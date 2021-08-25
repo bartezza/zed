@@ -58,15 +58,28 @@ E0 => 11100000 => 11 (variable form), 1 (count is VAR), opcode = 0 (call routine
 FF FF
 00 => variable number for result
 
+CALL:
+
+ - first op is **paked** address of routine
+ 
+ A packed address specifies where a routine or string begins in high memory. Given a packed address P, the formula to obtain the corresponding byte address B is:
+
+  2P           Versions 1, 2 and 3
+  4P           Versions 4 and 5
+  4P + 8R_O    Versions 6 and 7, for routine calls
+  4P + 8S_O    Versions 6 and 7, for print_paddr
+  8P           Version 8
+R_O and S_O are the routine and strings offsets (specified in the header as words at $28 and $2a, respectively).
 
 
-E0 03 2A FD 83 A4 FF FF
+Variable number $00 refers to the top of the stack, $01 to $0f mean the local variables of the current routine and $10 to $ff mean the global variables
+
+
+E0 03 2A 39 80 10 FF FF
 00 E1 97 00 00 01 E0 03
-2A FD 84 0F FF FF 00 E0
-03 2A FD 84 81 FF FF 00
-E1 97 00 00 01 E0 07 2A
-FD 73 2B 28 00 E0 07 2A
-FD 73 16 C8 00 E3 57 D0
+2A 39 80 7C FF FF 00 E0
+03 2A 39 80 F0 FF FF 00
+
 
 # Notes from icculus
 

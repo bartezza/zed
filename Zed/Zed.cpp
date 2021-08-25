@@ -4,6 +4,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include "Zed.h"
+#include <vector>
 
 
 #define BE16(w) \
@@ -155,7 +156,7 @@ int main(int argc, char** argv) {
     char cwd[MAX_PATH];
     GetCurrentDirectoryA(sizeof(cwd), cwd);
 
-#if 1 // TEST: parse z-text
+#if 0 // TEST: parse z-text
     const uint8_t temp[] = { 0x11, 0xaa, 0x46, 0x34, 0x16, 0x45, 0x9c, 0xa5 };
     char out[256];
     int ret = parseZText(temp, out, sizeof(out));
@@ -170,31 +171,171 @@ int main(int argc, char** argv) {
         printf("ERROR: Could not open '%s'\n", filename);
         return 1;
     }
+    fseek(fp, 0, SEEK_END);
+    long size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
 
-    ZHeader header;
-    fread(&header, sizeof(header), 1, fp);
-
-    assert(header.version <= 3);
-
-    printf("highMemory = %04X, staticMemory = %04X\n", BE16(header.highMemory), BE16(header.staticMemory));
-    printf("dict = %04X, objects = %04X, globals = %04X\n", BE16(header.dictionaryAddress), BE16(header.objectsAddress), BE16(header.globalsAddress));
-    printf("initPC = %04X\n", BE16(header.initPC));
-
-    unsigned char buf[0x38];
-    if (fseek(fp, BE16(header.initPC), SEEK_SET) != 0)
-        printf("ERROR: Could not seek to target address\n");
-
-    fread(buf, 1, sizeof(buf), fp);
-
-    for (int i = 0; i < sizeof(buf); ++i) {
-        printf("%02X ", buf[i]);
-        if (((i + 1) % 8) == 0)
-            printf("\n");
+    std::vector<uint8_t> mem(size);
+    if (fread(&mem[0], 1, size, fp) != size) {
+        printf("ERROR: Could not read %i bytes of story file\n", size);
+        fclose(fp);
+        return 1;
     }
-    printf("\n");
-
     fclose(fp);
 
-    printf("%s\n", cwd);
+
+    const ZHeader* header = (const ZHeader*)&mem[0];
+
+    assert(header->version <= 3);
+
+    printf("highMemory = %04X, staticMemory = %04X\n", BE16(header->highMemory), BE16(header->staticMemory));
+    printf("dict = %04X, objects = %04X, globals = %04X\n", BE16(header->dictionaryAddress), BE16(header->objectsAddress), BE16(header->globalsAddress));
+    printf("initPC = %04X\n", BE16(header->initPC));
+
+    uint32_t pc = BE16(header->initPC);
+
+#define OPC_VAR_CALL                224
+
+#define OPTYPE_LARGE_CONST          0x00
+#define OPTYPE_SMALL_CONST          0x01
+#define OPTYPE_VAR                  0x02
+#define OPTYPE_OMITTED              0x03
+
+#define CALLFRAME_OFF_PC                0
+#define CALLFRAME_OFF_RET               1
+#define CALLFRAME_OFF_NUM_LOCALS        2
+#define CALLFRAME_OFF_LOCALS            3
+
+// v1-3
+#define packedAddressToByte(_addr) \
+        (2 * _addr)
+
+    const char* opTypes[] = {
+        "large", "small", "var", "(no)"
+    };
+
+    //std::vector<uint8_t> callsMem(16 * 1024);
+    std::vector<uint16_t> callsPtr(1024);
+    uint32_t curCall = 0;
+
+    std::vector<uint16_t> stackMem(64 * 1024);
+    uint32_t sp = 0;
+
+    while (1) {
+        for (int i = 0; i < 32; ++i) {
+            printf("%02X ", mem[pc + i]);
+            if (((i + 1) % 8) == 0)
+                printf("\n");
+        }
+        printf("\n");
+
+        uint8_t opcode = mem[pc++];
+        switch (opcode) {
+        case OPC_VAR_CALL: {
+            printf("CALL");
+            uint8_t b = mem[pc++];
+            uint8_t opType[4] = {
+                (b >> 6) & 0x03,
+                (b >> 4) & 0x03,
+                (b >> 2) & 0x03,
+                b & 0x03
+            };
+
+            uint16_t vals[4] = {};
+            uint8_t numOps;
+            for (numOps = 0; numOps < 4; ++numOps) {
+                uint8_t opt = opType[numOps];
+                uint16_t val;
+                if (opt == OPTYPE_LARGE_CONST) {
+                    b = mem[pc++];
+                    uint8_t c = mem[pc++];
+                    vals[numOps] = ((uint16_t)b << 8) | (uint16_t)c;
+                    printf(" %04X", vals[numOps]);
+                }
+                else if (opt == OPTYPE_SMALL_CONST) {
+                    vals[numOps] = mem[pc++];
+                    printf(" %02X", vals[numOps]);
+                }
+                else if (opt == OPTYPE_VAR) {
+                    b = mem[pc++];
+                    // check which var
+                    if (b == 0) {
+                        // top of the stack
+                        assert(sp > 0);
+                        vals[numOps] = stackMem[sp - 1];
+                        printf(" (SP)");
+                    }
+                    else if (b <= 0x0F) {
+                        // local variable
+                        assert(curCall > 0);
+                        const uint32_t callPtr = callsPtr[curCall - 1];
+                        assert((b - 1) < stackMem[callPtr + CALLFRAME_OFF_NUM_LOCALS]); // check number of locals
+                        vals[numOps] = stackMem[callPtr + CALLFRAME_OFF_LOCALS + b - 1];
+                        printf(" L%u", b - 1);
+                    }
+                    else {
+                        // globals
+                        uint32_t addr = header->globalsAddress + (b - 0x10) * 2;
+                        vals[numOps] = ((uint16_t)mem[addr] << 8) | ((uint16_t)mem[addr + 1]);
+                        printf(" G%u", b - 0x10);
+                    }
+                }
+                else {
+                    // no more valid operands
+                    break;
+                }
+            }
+
+            // where to store the result
+            // TODO: handle this
+            b = mem[pc++];
+            printf(" -> VAR%u\n", b);
+
+            // execute routine
+            // save call frame ptr
+            callsPtr[curCall] = sp;
+            // store new location (not necessary, but handy for debugging)
+            uint32_t newPc = packedAddressToByte(vals[0]); // packed
+            assert(pc < mem.size());
+            stackMem[sp++] = newPc; // TOFIX: saving to 16bit
+            // store old location
+            stackMem[sp++] = pc;
+            // go to new location
+            pc = newPc;
+            // read number of local variables
+            uint8_t numLocals = mem[pc++];
+            assert(numLocals < 16);
+            stackMem[sp++] = numLocals;
+            // read the initial values of the local variables, v1-4
+            // NOTE: locals starts from callsPtr + 2
+            for (uint8_t i = 0; i < numLocals; ++i) {
+                b = mem[pc++];
+                stackMem[sp + i] = ((uint16_t)b << 8) | ((uint16_t)mem[pc++]);
+            }
+            // overwrite them with function arguments
+            for (uint8_t i = 0; i < (numOps - 1) && i < numLocals; ++i) {
+                stackMem[sp + i] = vals[i + 1];
+            }
+            // advance sp
+            sp += numLocals;
+            // advance call index
+            ++curCall;
+
+            // DEBUG: print call frame
+            uint32_t pp = callsPtr[curCall - 1];
+            printf("Call frame %u: start = %04X, ret = %04X, numLocals = %u\n", curCall - 1, stackMem[pp + CALLFRAME_OFF_PC], stackMem[pp + CALLFRAME_OFF_RET], stackMem[pp + CALLFRAME_OFF_NUM_LOCALS]);
+            for (uint16_t i = 0; i < stackMem[pp + CALLFRAME_OFF_NUM_LOCALS]; ++i)
+                printf("%u) %04X\n", i, stackMem[pp + CALLFRAME_OFF_LOCALS + i]);
+
+            break;
+        }
+        default:
+            printf("ERROR: Opcode %u not implemented yet\n", mem[pc]);
+            return 1;
+        };
+        
+        printf("\n");
+    }
+
     return 0;
 }
