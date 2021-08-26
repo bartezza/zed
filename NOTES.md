@@ -80,6 +80,25 @@ E0 03 2A 39 80 10 FF FF
 2A 39 80 7C FF FF 00 E0
 03 2A 39 80 F0 FF FF 00
 
+In short form, bits 4 and 5 of the opcode byte give an operand type as above. If this is $11 then the operand count is 0OP; otherwise, 1OP. In either case the opcode number is given in the bottom 4 bits.
+
+54 94 B4 03 74 94 92 04
+61 04 03 58 55 92 06 92
+A0 02 C6 55 93 06 93 74
+94 92 05 E1 9B 05 02 01
+
+54 = 01010100: 0 => long form (so 2OP), 1 = var, 0 = const, 10100 = h14 = ADD
+ADD = h14 00010100, Signed 16-bit addition
+
+In long form the operand count is always 2OP. The opcode number is given in the bottom 5 bits.
+
+In long form, bit 6 of the opcode gives the type of the first operand, bit 5 of the second.
+A value of 0 means a small constant and 1 means a variable. (If a 2OP instruction needs a
+large constant as operand, then it should be assembled in variable rather than long form.)
+
+
+https://docs.google.com/spreadsheets/d/1opwRfbMi5Asx3oFWNhAhVJ-R1RuUrV23VgPpbSAco4E/edit#gid=0
+
 
 # Notes from icculus
 

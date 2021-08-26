@@ -194,7 +194,19 @@ int main(int argc, char** argv) {
 
     uint32_t pc = BE16(header->initPC);
 
-#define OPC_VAR_CALL                224
+    // long form: bit7 = 0, bit6 = type 1st operand (0 = small constant, 1 = variable),
+    // bit5 = type 2nd operand, bit4-0 = opcode
+
+// 2OP
+#define OP_CONST_CONST              0b00000000
+#define OP_CONST_VAR                0b00100000
+#define OP_VAR_CONST                0b01000000
+#define OP_VAR_VAR                  0b01100000
+
+#define OPC_ADD                     0b00010100 // h14 (20), h54 (84), h34 (52), h74 (116)
+
+// VAR
+#define OPC_CALL                    224
 
 #define OPTYPE_LARGE_CONST          0x00
 #define OPTYPE_SMALL_CONST          0x01
@@ -203,8 +215,9 @@ int main(int argc, char** argv) {
 
 #define CALLFRAME_OFF_PC                0
 #define CALLFRAME_OFF_RET               1
-#define CALLFRAME_OFF_NUM_LOCALS        2
-#define CALLFRAME_OFF_LOCALS            3
+#define CALLFRAME_STORE_VAR             2
+#define CALLFRAME_OFF_NUM_LOCALS        3
+#define CALLFRAME_OFF_LOCALS            4
 
 // v1-3
 #define packedAddressToByte(_addr) \
@@ -221,17 +234,104 @@ int main(int argc, char** argv) {
     std::vector<uint16_t> stackMem(64 * 1024);
     uint32_t sp = 0;
 
-    while (1) {
-        for (int i = 0; i < 32; ++i) {
-            printf("%02X ", mem[pc + i]);
+    auto printVarName = [](uint8_t var) {
+        if (var == 0)
+            printf(" (SP)");
+        else if (var <= 0x0F)
+            printf(" L%02X", var - 1);
+        else
+            printf(" G%02X", var - 0x10);
+    };
+
+    auto getVar = [&](uint8_t b) -> uint16_t {
+        // check which var
+        if (b == 0) {
+            // pop from stack
+            assert(sp > 0);
+            return stackMem[--sp];
+        }
+        else if (b <= 0x0F) {
+            // local variable
+            assert(curCall > 0);
+            const uint32_t callPtr = callsPtr[curCall - 1];
+            assert((b - 1) < stackMem[callPtr + CALLFRAME_OFF_NUM_LOCALS]); // check number of locals
+            return stackMem[callPtr + CALLFRAME_OFF_LOCALS + b - 1];
+        }
+        else {
+            // globals
+            uint32_t addr = header->globalsAddress + (b - 0x10) * 2;
+            return ((uint16_t)mem[addr] << 8) | ((uint16_t)mem[addr + 1]);
+        }
+    };
+
+    auto setVar = [&](uint8_t var, uint16_t value) {
+        // check which var
+        if (var == 0) {
+            // push to stack
+            assert(sp < (stackMem.size() - 1));
+            stackMem[sp++] = value;
+        }
+        else if (var <= 0x0F) {
+            // local variable
+            assert(curCall > 0);
+            const uint32_t callPtr = callsPtr[curCall - 1];
+            assert((var - 1) < stackMem[callPtr + CALLFRAME_OFF_NUM_LOCALS]); // check number of locals
+            stackMem[callPtr + CALLFRAME_OFF_LOCALS + var - 1] = value;
+        }
+        else {
+            // globals
+            uint32_t addr = header->globalsAddress + (var - 0x10) * 2;
+            mem[addr] = (value >> 8) & 0xFF;
+            mem[addr + 1] = value & 0xFF;
+        }
+    };
+
+    auto getOperand_CONST = [&]() {
+        uint8_t _b = mem[pc++];
+        printf(" #%02X", _b);
+        return _b;
+    };
+
+    auto getOperand_VAR = [&]() {
+        uint8_t _b = mem[pc++];
+        uint16_t _val = getVar(_b);
+        printVarName(_b);
+        return _val;
+    };
+
+    auto dumpMem = [&](uint32_t _pc, uint32_t _size) {
+        for (uint32_t i = 0; i < _size; ++i) {
+            printf("%02X ", mem[_pc + i]);
             if (((i + 1) % 8) == 0)
                 printf("\n");
         }
         printf("\n");
+    };
+
+
+#define DEFINE_2OP_EX(name, func, opType1, opType2) \
+    case OPC_ ## name | OP_ ## opType1 ## _ ## opType2: { \
+        printf("%s", # name); \
+        uint16_t val1 = getOperand_ ## opType1 (); \
+        uint16_t val2 = getOperand_ ## opType2 (); \
+        uint8_t st = mem[pc++]; \
+        setVar(st, (uint16_t)(func)); \
+        printf(" ->"); printVarName(st); printf("\n"); \
+        break; \
+    }
+
+#define DEFINE_2OP(name, func) \
+    DEFINE_2OP_EX(name, (func), CONST, CONST) \
+    DEFINE_2OP_EX(name, (func), CONST, VAR) \
+    DEFINE_2OP_EX(name, (func), VAR, CONST) \
+    DEFINE_2OP_EX(name, (func), VAR, VAR)
+
+    while (1) {
+        // dumpMem(pc, 32);
 
         uint8_t opcode = mem[pc++];
         switch (opcode) {
-        case OPC_VAR_CALL: {
+        case OPC_CALL: {
             printf("CALL");
             uint8_t b = mem[pc++];
             uint8_t opType[4] = {
@@ -258,27 +358,8 @@ int main(int argc, char** argv) {
                 }
                 else if (opt == OPTYPE_VAR) {
                     b = mem[pc++];
-                    // check which var
-                    if (b == 0) {
-                        // top of the stack
-                        assert(sp > 0);
-                        vals[numOps] = stackMem[sp - 1];
-                        printf(" (SP)");
-                    }
-                    else if (b <= 0x0F) {
-                        // local variable
-                        assert(curCall > 0);
-                        const uint32_t callPtr = callsPtr[curCall - 1];
-                        assert((b - 1) < stackMem[callPtr + CALLFRAME_OFF_NUM_LOCALS]); // check number of locals
-                        vals[numOps] = stackMem[callPtr + CALLFRAME_OFF_LOCALS + b - 1];
-                        printf(" L%u", b - 1);
-                    }
-                    else {
-                        // globals
-                        uint32_t addr = header->globalsAddress + (b - 0x10) * 2;
-                        vals[numOps] = ((uint16_t)mem[addr] << 8) | ((uint16_t)mem[addr + 1]);
-                        printf(" G%u", b - 0x10);
-                    }
+                    printVarName(b);
+                    vals[numOps] = getVar(b);
                 }
                 else {
                     // no more valid operands
@@ -289,7 +370,7 @@ int main(int argc, char** argv) {
             // where to store the result
             // TODO: handle this
             b = mem[pc++];
-            printf(" -> VAR%u\n", b);
+            printf(" ->"); printVarName(b); printf("\n");
 
             // execute routine
             // save call frame ptr
@@ -300,6 +381,8 @@ int main(int argc, char** argv) {
             stackMem[sp++] = newPc; // TOFIX: saving to 16bit
             // store old location
             stackMem[sp++] = pc;
+            // store return variable
+            stackMem[sp++] = b;
             // go to new location
             pc = newPc;
             // read number of local variables
@@ -329,8 +412,37 @@ int main(int argc, char** argv) {
 
             break;
         }
+        /*case OPC_ADD | OP_VAR_CONST: {
+            printf("ADD");
+            uint8_t b = mem[pc++];
+            uint16_t val = getVar(b);
+            printVarName(b);
+            uint8_t c = mem[pc++];
+            printf(" #%02X", c);
+            // where to store the result
+            uint8_t st = mem[pc++];
+            setVar(st, (uint16_t)((int16_t)val + (int16_t)c));
+            printf(" ->"); printVarName(st); printf("\n");
+            break;
+        }
+        case OPC_ADD | OP_VAR_VAR: {
+            printf("ADD");
+            uint8_t b = mem[pc++];
+            uint16_t val = getVar(b);
+            printVarName(b);
+            uint8_t c = mem[pc++];
+            uint16_t val2 = getVar(c);
+            printVarName(c);
+            // where to store the result
+            uint8_t st = mem[pc++];
+            setVar(st, (uint16_t)((int16_t)val + (int16_t)val2));
+            printf(" ->"); printVarName(st); printf("\n");
+            break;
+        }*/
+        DEFINE_2OP(ADD, (int16_t)val1 + (int16_t)val2);
         default:
-            printf("ERROR: Opcode %u not implemented yet\n", mem[pc]);
+            dumpMem(pc - 1, 32);
+            printf("ERROR: Opcode %u not implemented yet\n", opcode);
             return 1;
         };
         
