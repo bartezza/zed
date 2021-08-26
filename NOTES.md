@@ -104,18 +104,18 @@ https://docs.google.com/spreadsheets/d/1opwRfbMi5Asx3oFWNhAhVJ-R1RuUrV23VgPpbSAc
 
 These are the instructions you need to implement to get to the title/copyright:
 
-add
-call
-je
+[X] add
+[X] call
+[X] je
 jump
-jz
+[X] jz
 loadw
 print
 put_prop
-ret
+[X] ret
 store
-storew
-sub
+[X] storew
+[X] sub
 test_attr
 new_line
 
