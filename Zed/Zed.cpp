@@ -10,6 +10,9 @@
 #define BE16(w) \
     ((((w) & 0xFF) << 8) | (((w) >> 8) & 0xFF))
 
+#define READ16(_addr) \
+    (((uint16_t) mem[(_addr)] << 8) | ((uint16_t) mem[(_addr) + 1]))
+
 
 // NOTE: +1 to include the last \0
 // NOTE: version 2-4
@@ -58,7 +61,7 @@ const char g_zalphabets[3 * 26 + 1] = {
 #define ZCHAR_SINGLE_CLICK  254
 
 
-int parseZText(const uint8_t* text, char* out, int outSize, uint32_t *outTextBytesRead) {
+int parseZText(const ZHeader *header, const uint8_t *mem, const uint8_t* text, char* out, int outSize, uint32_t *outTextBytesRead, bool enableAbbrev = true) {
 
     /*
     --first byte-------   --second byte---
@@ -70,7 +73,7 @@ int parseZText(const uint8_t* text, char* out, int outSize, uint32_t *outTextByt
 
     // read all z-text and extract the z-chars into a temporary buffer
     int i = 0;
-    char buf[256];
+    char buf[4096];
     int curBuf = 0;
     while (1) {
         // for (int i = 0; i < 10; i += 2) {
@@ -96,7 +99,10 @@ int parseZText(const uint8_t* text, char* out, int outSize, uint32_t *outTextByt
         // advance
         i += 2;
     }
-    *outTextBytesRead = i;
+
+    // return number of bytes read
+    if (outTextBytesRead)
+        *outTextBytesRead = i + 2; // skip last 2 bytes
 
     // NOTE: the code below is for version >= 3 only
     // parse the z-chars
@@ -127,15 +133,30 @@ int parseZText(const uint8_t* text, char* out, int outSize, uint32_t *outTextByt
         if (curCh == 0x00) {
             out[curOut++] = ' ';
         }
-        else if (curCh >= 1 && curCh <= 3) {
+        else if (curCh >= 1 && curCh <= 3) { // v3
             if (i >= (curBuf - 1))
                 break;
-            // abbreviation
+            // abbreviation index
             uint8_t abbrevIndex = 32 * (curCh - 1) + buf[i + 1];
-            // TODO: print abbreviation
-            printf("TODO: print abbreviation %u\n", abbrevIndex);
-           //  assert(false);
+            if (enableAbbrev) {
+                // read corresponding abbreviation location
+                uint32_t addr = BE16(header->abbrevAddress) + abbrevIndex * 2;
+                // NOTE: this is a word address (so we need to multiply it by 2)
+                uint32_t addr2 = READ16(addr) * 2;
+                // printf("[DEBUG] abbrevIndex = %u, addr = %04X, addr2 = %04X\n", abbrevIndex, addr, addr2);
+                // print abbreviation at location
+                int ret = parseZText(header, mem, &mem[addr2], &out[curOut], outSize - curOut, nullptr, false);
+                // advance curOut according to the abbreviation
+                curOut += ret;
+            }
+            else {
+                printf("\nERROR: Requested abbreviation %u with abbreviations disabled\n", abbrevIndex);
+            }
             ++i;
+        }
+        else if (curCh <= 5) {
+            printf("TODO: handle shift locking (curCh = %02X)\n", curCh);
+            // assert(false);
         }
         /*else if (curCh == ZCHAR_DELETE) {
             // for input
@@ -409,6 +430,30 @@ int main(int argc, char** argv) {
     printf("ERROR: Opcode %u not implemented yet (%02X)\n", opcode, opcode); \
     return 1; }
 
+
+#if 0
+    uint16_t addr = BE16(header->abbrevAddress) + 1 * 2;
+    printf("Abbrevs:\n");
+    dumpMem(BE16(header->abbrevAddress), 32);
+
+    uint32_t addr2 = READ16(addr);
+    //uint16_t addr2 = header->abbrevAddress + mem[addr];
+    printf("addr = %04X, addr2 = %04X\n", addr, addr2);
+
+    char out[1024];
+    int ret;
+    /*dumpMem(addr2, 32);
+    int ret = parseZText(header, mem.data(), &mem[addr2], out, sizeof(out), nullptr, false);
+    printf("'%s'\n", out);*/
+
+    dumpMem(addr2 * 2, 32);
+    ret = parseZText(header, mem.data(), &mem[addr2 * 2], out, sizeof(out), nullptr, false);
+    printf("'%s'\n", out);
+
+    return 1;
+#endif
+
+
     while (1) {
         printf("[%04X] ", pc);
         // dumpMem(pc, 32);
@@ -586,7 +631,7 @@ int main(int argc, char** argv) {
                 case OPC_PRINT: {
                     char out[1024];
                     uint32_t bytesRead = 0;
-                    int curOut = parseZText(&mem[pc], out, sizeof(out), &bytesRead);
+                    int curOut = parseZText(header, mem.data(), &mem[pc], out, sizeof(out), &bytesRead);
                     printf("> '%s'\n", out);
                     pc += bytesRead;
                     break;

@@ -110,13 +110,13 @@ These are the instructions you need to implement to get to the title/copyright:
 jump
 [X] jz
 loadw
-print
-put_prop
+[X] print
+[?] put_prop
 [X] ret
-store
+[X] store
 [X] storew
 [X] sub
-test_attr
+[?] test_attr
 new_line
 
 ...these are all the opcodes that Zork 1 uses, below. Of all the 119 opcodes,
