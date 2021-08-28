@@ -65,6 +65,7 @@
 // VAR
 #define OPC_STOREW                  0x01
 #define OPC_PUT_PROP                0x03
+#define OPC_PRINT_CHAR              0x05
 #define OPC_PRINT_NUM               0x06
 #define OPC_PUSH                    0x08
 #define OPC_PULL                    0x09 // 2OP
@@ -137,64 +138,27 @@ const char g_zalphabets[3 * 26 + 1] = {
 #define ZCHAR_SINGLE_CLICK  254
 
 
-int parseZText(const ZHeader *header, const uint8_t *mem, const uint8_t* text, char* out, int outSize, uint32_t *outTextBytesRead, bool enableAbbrev = true) {
+int parseZText(const ZHeader* header, const uint8_t* mem, const uint8_t* text, char* out, uint32_t outSize, uint32_t* outTextBytesRead, bool enableAbbrev = true);
 
-    /*
-    --first byte-------   --second byte---
-    7    6 5 4 3 2  1 0   7 6 5  4 3 2 1 0
-    bit  --first--  --second---  --third--
-    */
+int parseZCharacters(const ZHeader * header, const uint8_t * mem, const uint8_t *buf, uint32_t numBuf, char* out, uint32_t outSize, bool enableAbbrev = true) {
 
-    //  4 13 10  17 17 20  5 18 5  7 5 5.
-
-    // read all z-text and extract the z-chars into a temporary buffer
-    int i = 0;
-    char buf[4096];
-    int curBuf = 0;
-    while (1) {
-        // for (int i = 0; i < 10; i += 2) {
-        uint8_t a = (text[i] >> 2) & 0x1F;
-        uint8_t b = ((text[i] & 0x03) << 3) | ((text[i + 1] >> 5) & 0x07);
-        uint8_t c = text[i + 1] & 0x1F;
-
-        // TODO: deal better with this
-        assert(curBuf < sizeof(buf) - 3);
-
-        buf[curBuf++] = a;
-        buf[curBuf++] = b;
-        buf[curBuf++] = c;
-
-        // printf("a = %u, b = %u, c = %u\n", a, b, c);
-
-        // check end of text
-        if (text[i] & 0x80) {
-            // printf("EOT\n");
-            break;
-        }
-
-        // advance
-        i += 2;
-    }
-
-    // return number of bytes read
-    if (outTextBytesRead)
-        *outTextBytesRead = i + 2; // skip last 2 bytes
+    // TODO: change this to output ZSCII chars (not assuming ASCII as output)
 
     // NOTE: the code below is for version >= 3 only
     // parse the z-chars
-    int curOut = 0;
-    for (i = 0; i < curBuf; ++i) {
+    uint32_t curOut = 0;
+    for (uint32_t i = 0; i < numBuf; ++i) {
         uint8_t curCh = buf[i];
         uint8_t alphabet = 0;
         if (curCh == ZCHAR_SHIFT_A1) {
-            if (i >= (curBuf - 1))
+            if (i >= (numBuf - 1))
                 break;
             alphabet = 1;
             // advance
             curCh = buf[++i];
         }
         else if (buf[i] == ZCHAR_SHIFT_A2) {
-            if (i >= (curBuf - 1))
+            if (i >= (numBuf - 1))
                 break;
             // check for special char for 10 bits ZSCII
             if (buf[i + 1] == ZCHAR_A2_10BITS) {
@@ -210,7 +174,7 @@ int parseZText(const ZHeader *header, const uint8_t *mem, const uint8_t* text, c
             out[curOut++] = ' ';
         }
         else if (curCh >= 1 && curCh <= 3) { // v3
-            if (i >= (curBuf - 1))
+            if (i >= (numBuf - 1))
                 break;
             // abbreviation index
             uint8_t abbrevIndex = 32 * (curCh - 1) + buf[i + 1];
@@ -246,6 +210,71 @@ int parseZText(const ZHeader *header, const uint8_t *mem, const uint8_t* text, c
     }
     out[curOut] = '\0';
     return curOut;
+}
+
+int parseZText(const ZHeader* header, const uint8_t* mem, const uint8_t* text, char* out, uint32_t outSize, uint32_t* outTextBytesRead, bool enableAbbrev) {
+
+    /*
+    --first byte-------   --second byte---
+    7    6 5 4 3 2  1 0   7 6 5  4 3 2 1 0
+    bit  --first--  --second---  --third--
+    */
+
+    //  4 13 10  17 17 20  5 18 5  7 5 5.
+
+    // read all z-text and extract the z-chars into a temporary buffer
+    uint32_t i = 0;
+    uint8_t buf[4096];
+    uint32_t curBuf = 0;
+    while (1) {
+        // for (int i = 0; i < 10; i += 2) {
+        uint8_t a = (text[i] >> 2) & 0x1F;
+        uint8_t b = ((text[i] & 0x03) << 3) | ((text[i + 1] >> 5) & 0x07);
+        uint8_t c = text[i + 1] & 0x1F;
+
+        // TODO: deal better with this
+        assert(curBuf < sizeof(buf) - 3);
+
+        buf[curBuf++] = a;
+        buf[curBuf++] = b;
+        buf[curBuf++] = c;
+
+        // printf("a = %u, b = %u, c = %u\n", a, b, c);
+
+        // check end of text
+        if (text[i] & 0x80) {
+            // printf("EOT\n");
+            break;
+        }
+
+        // advance
+        i += 2;
+    }
+
+    // return number of bytes read
+    if (outTextBytesRead)
+        *outTextBytesRead = i + 2; // skip last 2 bytes
+
+    return parseZCharacters(header, mem, buf, curBuf, out, outSize, enableAbbrev);
+}
+
+// NOTE: the ZSCII should go to 1023, but in practice 256-1023 are not used
+char zsciiToAscii(uint8_t ch) {
+    // TODO: v6
+    if ((ch == 0) || (ch >= 32 && ch <= 126)) {
+        return (char)ch;
+    }
+    else if (ch == 13) {
+        return '\n';
+    }
+    else if (ch >= 155 && ch <= 251) {
+        // TODO: extra characters
+        return '?';
+    }
+    else {
+        assert(false);
+        // return '?';
+    }
 }
 
 
@@ -420,7 +449,7 @@ int main(int argc, char** argv) {
         }
         printf(" %04X", _dest);
         // check and eventually jump
-        if ((condition) ^ ((_b >> 7) & 1)) {
+        if (!((condition) ^ ((_b >> 7) & 1))) {
             // jump
             pc = _dest;
         }
@@ -577,6 +606,45 @@ int main(int argc, char** argv) {
     return 1;
 #endif
 
+#if 0
+
+#pragma pack(push, 1)
+    // v1-3
+    typedef struct ZObject {
+        uint32_t attr;
+        uint8_t parent;
+        uint8_t sibling;
+        uint8_t child;
+        uint16_t props; // byte address
+    } ZObject;
+#pragma pack(pop)
+
+    assert(sizeof(ZObject) == 9);
+
+    uint32_t addr = BE16(header->objectsAddress);
+    // property defaults table
+    // 31 words in v1-3, 63 words in v4+
+    assert(header->version <= 3);
+
+    char out[1024];
+
+    // v1-3: 255 objects at most, 9bytes each
+    for (int i = 1; i <= 255; ++i) {
+        const ZObject* obj = (const ZObject*)&mem[addr + 31 * 2 + (i - 1) * sizeof(ZObject)];
+        printf("%i) attr = %08X, parent = %u, sibling = %u, child = %u, props = %04X\n", i, obj->attr, obj->parent, obj->sibling, obj->child, obj->props);
+        // prop header: text-length (1 byte) + short name (text-length * 2 bytes)
+        uint32_t propHeader = BE16(obj->props);
+        uint16_t nameLen = mem[propHeader] * 2;
+        uint32_t bytesRead = 0;
+        int ret = parseZText(header, mem.data(), &mem[propHeader + 1], out, sizeof(out), &bytesRead);
+        printf("  text-length = %u, name = '%s'\n", nameLen, out);
+        //assert(bytesRead == nameLen);
+        if (bytesRead != nameLen)
+            printf("    => ERROR\n");
+    }
+
+    return 1;
+#endif
 
     while (1) {
         printf("[%04X] ", pc);
@@ -791,6 +859,13 @@ int main(int argc, char** argv) {
 
                     // TODO
 
+                    break;
+                }
+                case OPC_PRINT_CHAR: {
+                    printf(" PRINT_CHAR\n");
+                    assert(numOps == 1);
+                    char ch = zsciiToAscii(vals[0]);
+                    printf("> '%c'\n", ch);
                     break;
                 }
                 case OPC_PRINT_NUM: {
