@@ -7,11 +7,87 @@
 #include <vector>
 
 
+#define BIT0        0b00000001
+#define BIT1        0b00000010
+#define BIT2        0b00000100
+#define BIT3        0b00001000
+#define BIT4        0b00010000
+#define BIT5        0b00100000
+#define BIT6        0b01000000
+#define BIT7        0b10000000
+#define BIT8        0b0000000100000000
+#define BIT9        0b0000001000000000
+#define BIT10       0b0000010000000000
+#define BIT11       0b0000100000000000
+#define BIT12       0b0001000000000000
+#define BIT13       0b0010000000000000
+#define BIT14       0b0100000000000000
+#define BIT15       0b1000000000000000
+
 #define BE16(w) \
     ((((w) & 0xFF) << 8) | (((w) >> 8) & 0xFF))
 
 #define READ16(_addr) \
     (((uint16_t) mem[(_addr)] << 8) | ((uint16_t) mem[(_addr) + 1]))
+
+
+// 2OP
+#define OP_CONST_CONST              0b00000000
+#define OP_CONST_VAR                0b00100000
+#define OP_VAR_CONST                0b01000000
+#define OP_VAR_VAR                  0b01100000
+
+#define OPC_JE                      0x01
+#define OPC_INC_CHK                 0x05
+#define OPC_OR                      0x08
+#define OPC_AND                     0x09
+#define OPC_TEST_ATTR               0x0A
+#define OPC_STORE                   0x0D
+#define OPC_LOADW                   0x0F
+#define OPC_LOADB                   0x10
+#define OPC_ADD                     0x14 // h14 (20), h54 (84), h34 (52), h74 (116)
+#define OPC_SUB                     0x15
+#define OPC_MUL                     0x16
+#define OPC_DIV                     0x17
+#define OPC_MOD                     0x18
+
+// 1OP
+#define OPC_JZ                      0x00
+#define OPC_RET                     0x0B
+#define OPC_JUMP                    0x0C
+
+// 0OP
+#define OPC_RTRUE                   0x00
+#define OPC_RFALSE                  0x01
+#define OPC_PRINT                   0x02
+#define OPC_NEWLINE                 0x0B
+
+// VAR
+#define OPC_STOREW                  0x01
+#define OPC_PUT_PROP                0x03
+#define OPC_PRINT_NUM               0x06
+#define OPC_PUSH                    0x08
+#define OPC_PULL                    0x09 // 2OP
+
+// other (full) opcodes
+// VAR
+#define OPC_CALL                    224
+#define OPC_EXTENDED                0xBE
+
+#define OPTYPE_LARGE_CONST          0x00
+#define OPTYPE_SMALL_CONST          0x01
+#define OPTYPE_VAR                  0x02
+#define OPTYPE_OMITTED              0x03
+
+#define CALLFRAME_OFF_PC                0
+#define CALLFRAME_OFF_RET               1
+#define CALLFRAME_OFF_STORE_VAR         2
+#define CALLFRAME_OFF_NUM_LOCALS        3
+#define CALLFRAME_OFF_LOCALS            4
+
+// v1-3
+#define packedAddressToByte(_addr) \
+        (2 * _addr)
 
 
 // NOTE: +1 to include the last \0
@@ -173,7 +249,6 @@ int parseZText(const ZHeader *header, const uint8_t *mem, const uint8_t* text, c
 }
 
 
-
 int main(int argc, char** argv) {
     char cwd[MAX_PATH];
     GetCurrentDirectoryA(sizeof(cwd), cwd);
@@ -219,58 +294,6 @@ int main(int argc, char** argv) {
     // long form: bit7 = 0, bit6 = type 1st operand (0 = small constant, 1 = variable),
     // bit5 = type 2nd operand, bit4-0 = opcode
 
-// 2OP
-#define OP_CONST_CONST              0b00000000
-#define OP_CONST_VAR                0b00100000
-#define OP_VAR_CONST                0b01000000
-#define OP_VAR_VAR                  0b01100000
-
-#define OPC_JE                      0x01
-#define OPC_TEST_ATTR               0x0A
-#define OPC_STORE                   0x0D
-#define OPC_ADD                     0x14 // h14 (20), h54 (84), h34 (52), h74 (116)
-#define OPC_SUB                     0x15
-
-// 1OP
-#define OPC_JZ                      0x00
-#define OPC_RET                     0x0B
-
-// 0OP
-#define OPC_PRINT                   0x02
-
-// VAR
-#define OPC_STOREW                  0x01
-#define OPC_PUT_PROP                0x03
-
-// other (full) opcodes
-// VAR
-#define OPC_CALL                    224
-#define OPC_EXTENDED                0xBE
-
-#define OPTYPE_LARGE_CONST          0x00
-#define OPTYPE_SMALL_CONST          0x01
-#define OPTYPE_VAR                  0x02
-#define OPTYPE_OMITTED              0x03
-
-#define CALLFRAME_OFF_PC                0
-#define CALLFRAME_OFF_RET               1
-#define CALLFRAME_OFF_STORE_VAR         2
-#define CALLFRAME_OFF_NUM_LOCALS        3
-#define CALLFRAME_OFF_LOCALS            4
-
-#define BIT0        0b00000001
-#define BIT1        0b00000010
-#define BIT2        0b00000100
-#define BIT3        0b00001000
-#define BIT4        0b00010000
-#define BIT5        0b00100000
-#define BIT6        0b01000000
-#define BIT7        0b10000000
-
-// v1-3
-#define packedAddressToByte(_addr) \
-        (2 * _addr)
-
     const char* opTypes[] = {
         "large", "small", "var", "(no)"
     };
@@ -307,7 +330,7 @@ int main(int argc, char** argv) {
         }
         else {
             // globals
-            uint32_t addr = header->globalsAddress + (b - 0x10) * 2;
+            uint32_t addr = BE16(header->globalsAddress) + (b - 0x10) * 2;
             return ((uint16_t)mem[addr] << 8) | ((uint16_t)mem[addr + 1]);
         }
     };
@@ -330,7 +353,7 @@ int main(int argc, char** argv) {
         }
         else {
             // globals
-            uint32_t addr = header->globalsAddress + (var - 0x10) * 2;
+            uint32_t addr = BE16(header->globalsAddress) + (var - 0x10) * 2;
             mem[addr] = (value >> 8) & 0xFF;
             mem[addr + 1] = value & 0xFF;
             printf(" -> G%02X", var - 0x10);
@@ -380,7 +403,7 @@ int main(int argc, char** argv) {
         // bit7 == 0 => jump if false, else jump if true
         // if bit6 == 1 => offset in bit5-0
         // if bit6 == 0 => offset is 14bit signed bit5-0 first byte + all bits of next byte
-        uint8_t _b = mem[pc++];
+        uint16_t _b = (uint16_t) mem[pc++];
         printf(" %s", ((_b & BIT7) ? "[TRUE]" : "[FALSE]"));
         // read destination of jump
         uint32_t _dest;
@@ -388,7 +411,12 @@ int main(int argc, char** argv) {
             _dest = pc + (_b & 0b00111111) - 2;
         }
         else {
-            _dest = (int32_t)pc + (int32_t)(((_b & 0b00111111) << 8) | mem[pc++]) - 2;
+            // final offset is 14bit signed integer
+            uint16_t _offset = ((_b & 0b00111111) << 8) | (uint16_t) mem[pc++];
+            // make sure sign is preserved
+            if (_offset & BIT13)
+                _offset |= BIT14 | BIT15;
+            _dest = (int32_t)pc + (int16_t)_offset - 2;
         }
         printf(" %04X", _dest);
         // check and eventually jump
@@ -405,6 +433,102 @@ int main(int argc, char** argv) {
                 printf("\n");
         }
         printf("\n");
+    };
+
+    auto execute2OP = [&](uint8_t opcode, uint16_t val1, uint16_t val2, bool isVar1, uint8_t opByte1, bool isVar2, uint8_t opByte2) -> bool {
+        // parse and execute opcode
+        switch (opcode) {
+        case OPC_JE:
+            printf(" JE");
+            readBranchInfoAndJump(val1 == val2);
+            break;
+        case OPC_INC_CHK: {
+            printf(" INC_CHK");
+            assert(isVar1);
+            int16_t newVal = (int16_t)val1 + (int16_t)1;
+            setVar(opByte1, (uint16_t)(newVal));
+            readBranchInfoAndJump(newVal > (int16_t)val2);
+            break;
+        }
+        case OPC_OR:
+            printf(" OR");
+            setVar(mem[pc++], val1 | val2);
+            break;
+        case OPC_AND:
+            printf(" AND");
+            setVar(mem[pc++], val1 & val2);
+            break;
+        case OPC_TEST_ATTR:
+            printf(" TEST_ATTR");
+
+            // TODO: never jump
+
+            ++pc; // skip branch info
+            break;
+        case OPC_STORE:
+            printf(" STORE");
+            setVar((uint8_t)val1, val2);
+            break;
+        case OPC_LOADW:
+            printf(" LOADW");
+            // load word at word address
+            // TODO: check that the address lies in static or dynamic memory
+            setVar(mem[pc++], READ16((uint32_t)val1 + (uint32_t)val2 * 2));
+            break;
+        case OPC_LOADB:
+            printf(" LOADB");
+            // load byte at byte address
+            // TODO: check that the address lies in static or dynamic memory
+            setVar(mem[pc++], mem[(uint32_t)val1 + (uint32_t)val2]);
+            break;
+        case OPC_ADD:
+            printf(" ADD");
+            setVar(mem[pc++], (uint16_t)((int16_t)val1 + (int16_t)val2));
+            break;
+        case OPC_SUB:
+            printf(" SUB");
+            setVar(mem[pc++], (uint16_t)((int16_t)val1 - (int16_t)val2));
+            break;
+        case OPC_MUL:
+            printf(" MUL");
+            setVar(mem[pc++], (uint16_t)((int16_t)val1 * (int16_t)val2));
+            break;
+        case OPC_DIV:
+            printf(" DIV");
+            if (val2 == 0) {
+                printf("ERROR: Division by zero!\n");
+                return 1;
+            }
+            setVar(mem[pc++], (uint16_t)((int16_t)val1 / (int16_t)val2));
+            break;
+        case OPC_MOD:
+            printf(" MOD");
+            if (val2 == 0) {
+                printf("ERROR: Division by zero!\n");
+                return 1;
+            }
+            setVar(mem[pc++], (uint16_t)((int16_t)val1 % (int16_t)val2));
+            break;
+        default:
+            return false;
+        }
+        return true;
+    };
+
+    auto executeRet = [&](uint16_t val) {
+        assert(curCall > 0);
+        // decrement call index
+        --curCall;
+        // get store variable
+        uint8_t st = stackMem[callsPtr[curCall] + CALLFRAME_OFF_STORE_VAR];
+        // get where to return to
+        pc = stackMem[callsPtr[curCall] + CALLFRAME_OFF_RET];
+        // set stack pointer to old location, before the CALL
+        sp = callsPtr[curCall];
+        // store value
+        // NOTE: this is done after having reset the stack since st could be 0,
+        // meaning to push the return value onto the stack
+        setVar(st, val);
     };
 
 
@@ -458,6 +582,8 @@ int main(int argc, char** argv) {
         printf("[%04X] ", pc);
         // dumpMem(pc, 32);
 
+        // if (pc == 0x6F88) DebugBreak();
+
         uint32_t oldPc = pc;
         uint8_t opcode = mem[pc++];
         /*switch (opcode) {
@@ -473,6 +599,7 @@ int main(int argc, char** argv) {
             };
 
             uint16_t vals[4] = {};
+            uint8_t variables[4] = {};
             uint8_t numOps;
             for (numOps = 0; numOps < 4; ++numOps) {
                 uint8_t opt = opType[numOps];
@@ -480,7 +607,33 @@ int main(int argc, char** argv) {
                     // no more valid operands
                     break;
                 }
-                vals[numOps] = getOperand(opt);
+                
+                //vals[numOps] = getOperand(opt);
+
+                switch (opt) {
+                    case OPTYPE_LARGE_CONST: {
+                        uint8_t b = mem[pc++];
+                        uint8_t c = mem[pc++];
+                        uint16_t _val = ((uint16_t)b << 8) | (uint16_t)c;
+                        printf(" #%04X", _val);
+                        vals[numOps] = _val;
+                        break;
+                    }
+                    case OPTYPE_SMALL_CONST: {
+                        uint16_t _val = (uint16_t)mem[pc++];
+                        printf(" #%02X", _val);
+                        vals[numOps] = _val;
+                        break;
+                    }
+                    case OPTYPE_VAR: {
+                        uint8_t b = mem[pc++];
+                        printVarName(b);
+                        uint16_t _val = getVar(b);
+                        variables[numOps] = b;
+                        vals[numOps] = _val;
+                        break;
+                    }
+                }
             }
 
             // where to store the result
@@ -582,6 +735,7 @@ int main(int argc, char** argv) {
             };
 
             uint16_t vals[4] = {};
+            uint8_t variables[4] = {};
             uint8_t numOps;
             for (numOps = 0; numOps < 4; ++numOps) {
                 uint8_t opt = opType[numOps];
@@ -589,35 +743,91 @@ int main(int argc, char** argv) {
                     // no more valid operands
                     break;
                 }
-                vals[numOps] = getOperand(opt);
+                
+                //vals[numOps] = getOperand(opt);
+
+                switch (opt) {
+                    case OPTYPE_LARGE_CONST: {
+                        uint8_t b = mem[pc++];
+                        uint8_t c = mem[pc++];
+                        uint16_t _val = ((uint16_t)b << 8) | (uint16_t)c;
+                        vals[numOps] = _val;
+                        printf(" #%04X", _val);
+                        break;
+                    }
+                    case OPTYPE_SMALL_CONST: {
+                        uint16_t _val = (uint16_t)mem[pc++];
+                        vals[numOps] = _val;
+                        printf(" #%02X", _val);
+                        break;
+                    }
+                    case OPTYPE_VAR: {
+                        uint8_t b = mem[pc++];
+                        uint16_t _val = getVar(b);
+                        variables[numOps] = b;
+                        vals[numOps] = _val;
+                        printVarName(b);
+                        break;
+                    }
+                }
             }
 
-            // NOTE: bit5-0
-            switch (opcode & 0b00111111) {
-            // TODO: move CALL here
-            case OPC_STOREW | BIT5: {
-                printf(" STOREW");
-                assert(numOps == 3);
-                // TODO: check actual address (should be in dynamic memory)
-                uint32_t addr = vals[0] + 2 * vals[1];
-                mem[addr] = (vals[2] >> 8) & 0xFF;
-                mem[addr + 1] = vals[2] & 0xFF;
-                break;
+            // check if VAR or 2OP
+            if (opcode & BIT5) {
+                // VAR opcode
+                switch (opcode & 0b00011111) {
+                    // TODO: move CALL here
+                case OPC_STOREW: {
+                    printf(" STOREW");
+                    assert(numOps == 3);
+                    // TODO: check actual address (should be in dynamic memory)
+                    uint32_t addr = (uint32_t)vals[0] + (uint32_t)vals[1] * 2;
+                    mem[addr] = (vals[2] >> 8) & 0xFF;
+                    mem[addr + 1] = vals[2] & 0xFF;
+                    break;
+                }
+                case OPC_PUT_PROP: {
+                    printf(" PUT_PROP (TODO!)");
+
+                    // TODO
+
+                    break;
+                }
+                case OPC_PRINT_NUM: {
+                    printf(" PRINT_NUM\n");
+                    assert(numOps == 1);
+                    printf("> '%i'\n", (int16_t)vals[0]);
+                    break;
+                }
+                /*case OPC_PUSH: {
+
+                    break;
+                }*/
+                /*case OPC_PULL: {
+                    printf(" PULL");
+                    assert(numOps == 1);
+                    printf("asd %u\n", opType[0]);
+                    assert(false);
+                    break;
+                }*/
+                default:
+                    printf("\n\n");
+                    dumpMem(oldPc, 32);
+                    printf("ERROR: variable %s opcode %02X not implemented yet (op = %u)\n",
+                        (opcode & BIT5) == 0 ? "2OP" : "VAR",
+                        opcode & 0b00011111, opcode);
+                    return 1;
+                }
             }
-            case OPC_PUT_PROP | BIT5: {
-                printf(" PUT_PROP (TODO!)");
-                
-                // TODO
-                
-                break;
-            }
-            default:
-                printf("\n\n");
-                dumpMem(oldPc, 32);
-                printf("ERROR: variable %s opcode %02X not implemented yet (op = %u)\n",
-                    (opcode & BIT5) == 0 ? "2OP" : "VAR",
-                    opcode & 0b00011111, opcode);
-                return 1;
+            else {
+                // handle 2OP
+                assert(numOps == 2);
+                if (!execute2OP(opcode & 0b00011111, vals[0], vals[1], opType[0] == OPTYPE_VAR, variables[0], opType[1] == OPTYPE_VAR, variables[1])) {
+                    printf("\n\n");
+                    dumpMem(oldPc, 32);
+                    printf("ERROR: variable 2OP opcode %02X not implemented yet (op = %u)\n", opcode & 0b00011111, opcode);
+                    return 1;
+                }
             }
         }
         else if ((opcode & OPC_FORM_MASK) == OPC_FORM_SHORT) {
@@ -628,12 +838,24 @@ int main(int argc, char** argv) {
                 // this means it's a 0OP instruction
                 // opcode in bit3-0
                 switch (opcode & 0b00001111) {
+                case OPC_RTRUE:
+                    executeRet(1);
+                    break;
+                case OPC_RFALSE:
+                    executeRet(0);
+                    break;
                 case OPC_PRINT: {
+                    printf(" PRINT\n");
                     char out[1024];
                     uint32_t bytesRead = 0;
                     int curOut = parseZText(header, mem.data(), &mem[pc], out, sizeof(out), &bytesRead);
                     printf("> '%s'\n", out);
                     pc += bytesRead;
+                    break;
+                }
+                case OPC_NEWLINE: {
+                    printf(" NEW_LINE\n");
+                    printf(">\n");
                     break;
                 }
                 default:
@@ -656,19 +878,14 @@ int main(int argc, char** argv) {
                     break;
                 case OPC_RET: {
                     printf(" RET");
-                    assert(curCall > 0);
-                    // decrement call index
-                    --curCall;
-                    // get store variable
-                    uint8_t st = stackMem[callsPtr[curCall] + CALLFRAME_OFF_STORE_VAR];
-                    // get where to return to
-                    pc = stackMem[callsPtr[curCall] + CALLFRAME_OFF_RET];
-                    // set stack pointer to old location, before the CALL
-                    sp = callsPtr[curCall];
-                    // store value
-                    // NOTE: this is done after having reset the stack since st could be 0,
-                    // meaning to push the return value onto the stack
-                    setVar(st, val);
+                    executeRet(val);
+                    break;
+                }
+                case OPC_JUMP: {
+                    printf(" JUMP");
+                    // branch of 16bits signed offset
+                    pc = (uint32_t)((int32_t)pc + (int16_t)val - 2);
+                    printf(" %04X", pc);
                     break;
                 }
                 default:
@@ -688,33 +905,26 @@ int main(int argc, char** argv) {
             // opcode in bit4-0
 
             // read 1st operand
-            uint16_t val1 = ((opcode & BIT6) != 0 ? getOperand_VAR() : getOperand_CONST());
+            uint8_t isVar1 = (opcode & BIT6) != 0;
+
+            // TODO HAX: set isVar to true if opcode requires
+            if ((opcode & 0b00011111) == OPC_INC_CHK)
+                isVar1 = true;
+
+            uint8_t opByte1 = mem[pc++];
+            uint16_t val1 = isVar1 ? getVar(opByte1) : (uint16_t)opByte1;
+            if (isVar1) printVarName(opByte1); else printf(" #%02X", opByte1);
+
             // read 2nd operand
-            uint16_t val2 = ((opcode & BIT5) != 0 ? getOperand_VAR() : getOperand_CONST());
-            // parse and execute opcode
-            switch (opcode & 0b00011111) {
-            case OPC_JE:
-                printf(" JE");
-                readBranchInfoAndJump(val1 == val2);
-                break;
-            case OPC_TEST_ATTR:
-                printf(" TEST_ATTR");
-                // TODO: never jump
-                ++pc; // skip branch info
-                break;
-            case OPC_STORE:
-                printf(" STORE");
-                setVar((uint8_t)val1, val2);
-                break;
-            case OPC_ADD:
-                printf(" ADD");
-                setVar(mem[pc++], (uint16_t)((int16_t)val1 + (int16_t)val2));
-                break;
-            case OPC_SUB:
-                printf(" SUB");
-                setVar(mem[pc++], (uint16_t)((int16_t)val1 - (int16_t)val2));
-                break;
-            default:
+            uint8_t isVar2 = (opcode & BIT5) != 0;
+            uint8_t opByte2 = mem[pc++];
+            uint16_t val2 = isVar2 ? getVar(opByte2) : (uint16_t)opByte2;
+            if (isVar2) printVarName(opByte2); else printf(" #%02X", opByte2);
+
+            //if (oldPc == 0x6fa4) DebugBreak();
+
+            // handle 2OP
+            if (!execute2OP(opcode & 0b00011111, val1, val2, isVar1, opByte1, isVar2, opByte2)) {
                 printf("\n\n");
                 dumpMem(oldPc, 32);
                 printf("ERROR: long 2OP opcode %02X not implemented yet (op = %u)\n", opcode & 0b00011111, opcode);
