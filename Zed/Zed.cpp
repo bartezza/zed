@@ -91,6 +91,114 @@
         (2 * _addr)
 
 
+const char* g_opcodes2OP[] = {
+    "INVALID",
+    "JE", // 0x01
+    "JL",
+    "JG",
+    "DEC_CHK",
+    "INC_CHK", // 0x05
+    "JIN",
+    "TEST",
+    "OR",
+    "AND",
+    "TEST_ATTR", // 0x0A
+    "SET_ATTR",
+    "CLEAR_ATTR",
+    "STORE",
+    "INSERT_OBJ",
+    "LOADW",
+    "LOADB", // 0x10
+    "GET_PROP",
+    "GET_PROP_ADDR",
+    "GET_NEXT_PROP",
+    "ADD",
+    "SUB", // 0x15
+    "MUL",
+    "DIV",
+    "MOD",
+    "CALL_2S",
+    "CALL_2N", // 0x1A
+    "SET_COLOUR",
+    "THROW"
+};
+
+const char* g_opcodes1OP[] = {
+    "JS", // 0x00
+    "GET_SIBLING",
+    "GET_CHILD",
+    "GET_PARENT",
+    "GET_PROP_LEN",
+    "INC", // 0x05
+    "DEC",
+    "PRINT_ADDR",
+    "CALL_1S",
+    "REMOVE_OBJ",
+    "PRINT_OBJ", // 0x0A
+    "RET",
+    "JUMP",
+    "PRINT_PADDR",
+    "LOAD",
+    "NOT" // 0x0F v1-4, CALL_1N v5
+};
+
+const char* g_opcodes0OP[] = {
+    "RTRUE", // 0x00
+    "RFALSE",
+    "PRINT",
+    "PRINT_RET",
+    "NOP", // only v1
+    "SAVE", // 0x05, v1-4, then illegal
+    "RESTORE", // v1-4, then illegal
+    "RESTART",
+    "RET_POPPED",
+    "POP", // v1-4, CATCH v5-6
+    "QUIT", // 0x0A
+    "NEW_LINE",
+    "SHOW_STATUS", // v3, then illegal
+    "VERIFY", // v3+
+    "EXTENDED", // v5+
+    "PIRACY" // 0x0F, v5 only
+};
+
+const char* g_opcodesVAR[] = {
+    "CALL", // 0x00, CALL_VS v4+
+    "STOREW",
+    "STOREB",
+    "PUT_PROP",
+    "SREAD", // v1-4, AREAD v5+
+    "PRINT_CHAR", // 0x05
+    "PRINT_NUM",
+    "RANDOM",
+    "PUSH",
+    "PULL",
+    "SPLIT_WINDOW", // 0x0A, v3+
+    "SET_WINDOW", // v3+
+    "CALL_VS2", // v4+
+    "ERASE_WINDOW", // v4+
+    "ERASE_LINE", // v4/6
+    "SET_CURSOR", // v4
+    "GET_CURSOR", // 0x10, v4/6
+    "SET_TEXT_STYLE", // v4
+    "BUFFER_MODE", // v4
+    "OUTPUT_STREAM", // v3
+    "INPUT_STREAM", // v3
+    "SOUND_EFFECT", // 0x15, v3
+    "READ_CHAR", // v4
+    "SCAN_TABLE", // v4
+    "NOT", // v5
+    "CALL_VN", // v5
+    "CALL_VN2", // 0x1A, v5
+    "TOKENISE", // v5
+    "ENCODE_TEXT", // v5
+    "COPY_TABLE", // v5
+    "PRINT_TABLE", // v5
+    "CHECK_ARG_COUNT" // 0x1F, v5
+};
+
+// TODO: ext table of opcodes
+
+
 // NOTE: +1 to include the last \0
 // NOTE: version 2-4
 const char g_zalphabets[3 * 26 + 1] = {
@@ -487,13 +595,13 @@ int main(int argc, char** argv) {
             printf(" AND");
             setVar(mem[pc++], val1 & val2);
             break;
-        case OPC_TEST_ATTR:
+        /*case OPC_TEST_ATTR:
             printf(" TEST_ATTR");
 
-            // TODO: never jump
+            // TODO OP: never jump
 
             ++pc; // skip branch info
-            break;
+            break;*/
         case OPC_STORE:
             printf(" STORE");
             setVar((uint8_t)val1, val2);
@@ -854,13 +962,13 @@ int main(int argc, char** argv) {
                     mem[addr + 1] = vals[2] & 0xFF;
                     break;
                 }
-                case OPC_PUT_PROP: {
+                /*case OPC_PUT_PROP: {
                     printf(" PUT_PROP (TODO!)");
 
-                    // TODO
+                    // TODO OP
 
                     break;
-                }
+                }*/
                 case OPC_PRINT_CHAR: {
                     printf(" PRINT_CHAR\n");
                     assert(numOps == 1);
@@ -888,9 +996,8 @@ int main(int argc, char** argv) {
                 default:
                     printf("\n\n");
                     dumpMem(oldPc, 32);
-                    printf("ERROR: variable %s opcode %02X not implemented yet (op = %u)\n",
-                        (opcode & BIT5) == 0 ? "2OP" : "VAR",
-                        opcode & 0b00011111, opcode);
+                    printf("ERROR: variable VAR opcode %02X (%s) not implemented yet (op = %u)\n",
+                        opcode & 0b00011111, g_opcodesVAR[opcode & 0b00011111], opcode);
                     return 1;
                 }
             }
@@ -900,7 +1007,8 @@ int main(int argc, char** argv) {
                 if (!execute2OP(opcode & 0b00011111, vals[0], vals[1], opType[0] == OPTYPE_VAR, variables[0], opType[1] == OPTYPE_VAR, variables[1])) {
                     printf("\n\n");
                     dumpMem(oldPc, 32);
-                    printf("ERROR: variable 2OP opcode %02X not implemented yet (op = %u)\n", opcode & 0b00011111, opcode);
+                    printf("ERROR: variable 2OP opcode %02X (%s) not implemented yet (op = %u)\n",
+                        opcode & 0b00011111, g_opcodes2OP[opcode & 0b00011111], opcode);
                     return 1;
                 }
             }
@@ -936,9 +1044,8 @@ int main(int argc, char** argv) {
                 default:
                     printf("\n\n");
                     dumpMem(oldPc, 32);
-                    printf("ERROR: short %s opcode %02X not implemented yet (op = %u)\n",
-                        (opcode & (BIT4 | BIT5)) == (BIT4 | BIT5) ? "0OP" : "1OP",
-                        opcode & 0b00001111, opcode);
+                    printf("ERROR: short 0OP opcode %02X (%s) not implemented yet (op = %u)\n",
+                        opcode & 0b00001111, g_opcodes0OP[opcode & 0b00001111], opcode);
                     return 1;
                 }
             }
@@ -966,9 +1073,8 @@ int main(int argc, char** argv) {
                 default:
                     printf("\n\n");
                     dumpMem(oldPc, 32);
-                    printf("ERROR: short %s opcode %02X not implemented yet (op = %u)\n",
-                        (opcode & (BIT4 | BIT5)) == (BIT4 | BIT5) ? "0OP" : "1OP",
-                        opcode & 0b00001111, opcode);
+                    printf("ERROR: short 1OP opcode %02X (%s) not implemented yet (op = %u)\n",
+                        opcode & 0b00001111, g_opcodes1OP[opcode & 0b00001111], opcode);
                     return 1;
                 }
             }
@@ -1002,7 +1108,8 @@ int main(int argc, char** argv) {
             if (!execute2OP(opcode & 0b00011111, val1, val2, isVar1, opByte1, isVar2, opByte2)) {
                 printf("\n\n");
                 dumpMem(oldPc, 32);
-                printf("ERROR: long 2OP opcode %02X not implemented yet (op = %u)\n", opcode & 0b00011111, opcode);
+                printf("ERROR: long 2OP opcode %02X (%s) not implemented yet (op = %u)\n",
+                    opcode & 0b00011111, g_opcodes2OP[opcode & 0b00011111], opcode);
                 return 1;
             }
         }
