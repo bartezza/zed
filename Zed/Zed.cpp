@@ -1241,13 +1241,34 @@ int main(int argc, char** argv) {
             }
             else {
                 // handle 2OP
-                assert(numOps == 2);
-                if (!execute2OP(opcode & 0b00011111, vals[0], vals[1], opType[0] == OPTYPE_VAR, variables[0], opType[1] == OPTYPE_VAR, variables[1])) {
-                    printf("\n\n");
-                    dumpMem(oldPc, 32);
-                    printf("ERROR: variable 2OP opcode %02X (%s) not implemented yet (op = %u)\n",
-                        opcode & 0b00011111, g_opcodes2OP[opcode & 0b00011111], opcode);
-                    return 1;
+                // if (oldPc == 0x8EDC) DebugBreak();
+
+                // TODO: handle this better
+                uint8_t opcode2 = opcode & 0b00011111;
+
+                if (opcode2 == OPC_JE) {
+                    printf(" JE");
+                    // je a b c d ?(label)
+                    // Jump if a is equal to any of the subsequent operands.
+                    // (Thus @je a never jumps and @je a b jumps if a = b.)
+                    // je with just 1 operand is not permitted.
+                    assert(numOps > 1);
+                    if (numOps == 2)
+                        readBranchInfoAndJump(vals[0] == vals[1]);
+                    else if (numOps == 3)
+                        readBranchInfoAndJump((vals[0] == vals[1]) || (vals[0] == vals[2]));
+                    else
+                        readBranchInfoAndJump((vals[0] == vals[1]) || (vals[0] == vals[2]) || (vals[0] == vals[3]));
+                }
+                else {
+                    assert(numOps == 2);
+                    if (!execute2OP(opcode2, vals[0], vals[1], opType[0] == OPTYPE_VAR, variables[0], opType[1] == OPTYPE_VAR, variables[1])) {
+                        printf("\n\n");
+                        dumpMem(oldPc, 32);
+                        printf("ERROR: variable 2OP opcode %02X (%s) not implemented yet (op = %u)\n",
+                            opcode & 0b00011111, g_opcodes2OP[opcode & 0b00011111], opcode);
+                        return 1;
+                    }
                 }
             }
         }
