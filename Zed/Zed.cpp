@@ -41,7 +41,12 @@
 #define OP_VAR_VAR                  0b01100000
 
 #define OPC_JE                      0x01
+#define OPC_JL                      0x02
+#define OPC_JG                      0x03
+#define OPC_DEC_CHK                 0x04
 #define OPC_INC_CHK                 0x05
+#define OPC_JIN                     0x06
+#define OPC_TEST                    0x07
 #define OPC_OR                      0x08
 #define OPC_AND                     0x09
 #define OPC_TEST_ATTR               0x0A
@@ -618,6 +623,18 @@ int main(int argc, char** argv) {
             int16_t newVal = (int16_t)val1 + (int16_t)1;
             setVar(opByte1, (uint16_t)(newVal));
             readBranchInfoAndJump(newVal > (int16_t)val2);
+            break;
+        }
+        case OPC_JIN: {
+            printf(" JIN");
+            // jin obj1 obj2 ?(label)
+            const ZObject_v1* obj1 = getObject(val1);
+            const ZObject_v1* obj2 = getObject(val2);
+            // DEBUG: print object name
+            debugPrintObjName(obj1);
+            debugPrintObjName(obj2);
+            // jump if obj1 is direct child of obj2
+            readBranchInfoAndJump(obj1->parent == val2);
             break;
         }
         case OPC_OR:
