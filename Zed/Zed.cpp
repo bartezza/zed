@@ -46,6 +46,7 @@
 #define OPC_AND                     0x09
 #define OPC_TEST_ATTR               0x0A
 #define OPC_STORE                   0x0D
+#define OPC_INSERT_OBJ              0x0E
 #define OPC_LOADW                   0x0F
 #define OPC_LOADB                   0x10
 #define OPC_ADD                     0x14 // h14 (20), h54 (84), h34 (52), h74 (116)
@@ -391,7 +392,7 @@ char zsciiToAscii(uint8_t ch) {
 void printZText(const ZHeader* header, const uint8_t* mem, const uint8_t* text) {
     char out[1024];
     parseZText(header, mem, text, out, sizeof(out), nullptr);
-    puts(out);
+    printf("%s", out);
 }
 
 
@@ -582,13 +583,17 @@ int main(int argc, char** argv) {
     };
 
     // v1-3
-    auto getObject = [&](uint8_t objIndex) -> const ZObject_v1* {
+    auto getObject = [&](uint8_t objIndex) -> ZObject_v1* {
         // v1-3
         assert(header->version <= 3);
         // TODO: objIndex != 0
         uint16_t baseObjs = BE16(header->objectsAddress);
-        const ZObject_v1* obj = (const ZObject_v1*)&mem[baseObjs + 31 * 2 + (objIndex - 1) * sizeof(ZObject_v1)];
+        ZObject_v1* obj = (ZObject_v1*)&mem[baseObjs + 31 * 2 + (objIndex - 1) * sizeof(ZObject_v1)];
         return obj;
+    };
+
+    auto debugPrintObjName = [&](const ZObject_v1* _obj) {
+        printf(" '"); printZText(header, mem.data(), &mem[BE16(_obj->props) + 1]); printf("'");
     };
 
     auto execute2OP = [&](uint8_t opcode, uint16_t val1, uint16_t val2, bool isVar1, uint8_t opByte1, bool isVar2, uint8_t opByte2) -> bool {
@@ -619,10 +624,8 @@ int main(int argc, char** argv) {
             assert(val2 < 32);
             // put_prop object property value
             const ZObject_v1* obj = getObject(val1);
-            // get prop header
-            uint16_t curPtr = BE16(obj->props);
             // DEBUG: print object name
-            puts(" '"); printZText(header, mem.data(), &mem[curPtr + 1]); puts("'");
+            debugPrintObjName(obj);
             // check attribute and jump
             uint8_t cond = obj->attr[val2 >> 3] & (1 << (7 - val2 & 0x07));
             readBranchInfoAndJump(cond);
@@ -632,6 +635,52 @@ int main(int argc, char** argv) {
             printf(" STORE");
             setVar((uint8_t)val1, val2);
             break;
+        case OPC_INSERT_OBJ: {
+            printf(" INSERT_OBJ");
+            // insert_obj object destination
+            assert(val1 < 256);
+            assert(val2 < 256);
+            uint8_t objId = (uint8_t)val1;
+            uint8_t destId = (uint8_t)val2;
+            ZObject_v1* obj = getObject(objId);
+            ZObject_v1* dest = getObject(destId);
+
+            // DEBUG: print object names
+            debugPrintObjName(obj);
+            debugPrintObjName(dest);
+            
+            // if obj already belongs to a hierarchy of objects we need to fix it
+            if (obj->parent != 0) {
+                // check if obj is first child of its parent
+                ZObject_v1* objParent = getObject(obj->parent);
+                if (objParent->child == objId) {
+                    // easy, just set obj sibling as new first child
+                    objParent->child = obj->sibling;
+                }
+                else {
+                    // this means that obj is not first child, but it's somewhere
+                    // in the sibling chain
+                    // check each of them until we find an object pointing to ours
+                    uint8_t curObjId = objParent->child;
+                    ZObject_v1* curObj = getObject(curObjId);
+                    while (curObj->sibling != 0) {
+                        if (curObj->sibling == objId) {
+                            // substitute obj with the next sibling in the chain
+                            curObj->sibling = obj->sibling;
+                            break;
+                        }
+                    }
+                }
+            }
+            // new sibling is the current first child of dest, which will become
+            // second child
+            obj->sibling = dest->child;
+            // obj is the new first child of dest
+            dest->child = objId;
+            // fix also obj parent
+            obj->parent = destId;
+            break;
+        }
         case OPC_LOADW:
             printf(" LOADW");
             // load word at word address
@@ -957,10 +1006,10 @@ int main(int argc, char** argv) {
                     printf(" PUT_PROP");
                     // put_prop object property value
                     const ZObject_v1* obj = getObject(vals[0]);
+                    // DEBUG: print object name
+                    debugPrintObjName(obj);
                     // get prop header
                     uint16_t curPtr = BE16(obj->props);
-                    // DEBUG: print object name
-                    puts(" '"); printZText(header, mem.data(), &mem[curPtr + 1]); puts("'");
                     // skip name of object
                     curPtr += 1 + mem[curPtr] * 2;
                     // read properties
