@@ -1226,6 +1226,15 @@ int main(int argc, char** argv) {
                     printf(" JZ");
                     readBranchInfoAndJump(val == 0);
                     break;
+                case OPC_GET_PARENT: {
+                    printf(" GET_PARENT");
+                    // get_parent object -> (result)
+                    uint8_t objId = (uint8_t)val;
+                    ZObject_v1* obj = getObject(objId);
+                    debugPrintObjName(obj);
+                    setVar(mem[pc++], obj->parent);
+                    break;
+                }
                 case OPC_PRINT_OBJ: {
                     printf(" PRINT_OBJ\n");
                     // print_obj object
