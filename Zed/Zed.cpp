@@ -45,15 +45,24 @@
 #define OPC_OR                      0x08
 #define OPC_AND                     0x09
 #define OPC_TEST_ATTR               0x0A
+#define OPC_SET_ATTR                0x0B
+#define OPC_CLEAR_ATTR              0x0C
 #define OPC_STORE                   0x0D
 #define OPC_INSERT_OBJ              0x0E
 #define OPC_LOADW                   0x0F
 #define OPC_LOADB                   0x10
+#define OPC_GET_PROP                0x11
+#define OPC_GET_PROP_ADDR           0x12
+#define OPC_GET_NEXT_PROP           0x13
 #define OPC_ADD                     0x14 // h14 (20), h54 (84), h34 (52), h74 (116)
 #define OPC_SUB                     0x15
 #define OPC_MUL                     0x16
 #define OPC_DIV                     0x17
 #define OPC_MOD                     0x18
+#define OPC_CALL_2S                 0x19
+#define OPC_CALL_2N                 0x1A
+#define OPC_SET_COLOUR              0x1B
+#define OPC_THROW                   0x1C
 
 // 1OP
 #define OPC_JZ                      0x00
@@ -631,6 +640,17 @@ int main(int argc, char** argv) {
             readBranchInfoAndJump(cond);
             break;
         }
+        case OPC_SET_ATTR: {
+            printf(" SET_ATTR");
+            assert(val2 < 32);
+            // set_attr object attribute
+            ZObject_v1* obj = getObject(val1);
+            // DEBUG: print object name
+            debugPrintObjName(obj);
+            // set attribute
+            obj->attr[val2 >> 3] |= (1 << (7 - val2 & 0x07));
+            break;
+        }
         case OPC_STORE:
             printf(" STORE");
             setVar((uint8_t)val1, val2);
@@ -1058,17 +1078,21 @@ int main(int argc, char** argv) {
                     printf("> '%i'\n", (int16_t)vals[0]);
                     break;
                 }
-                /*case OPC_PUSH: {
-
+                case OPC_PUSH: {
+                    printf(" PUSH\n");
+                    assert(numOps == 1);
+                    // push value
+                    stackMem[sp++] = vals[0];
                     break;
-                }*/
-                /*case OPC_PULL: {
+                }
+                case OPC_PULL: {
                     printf(" PULL");
                     assert(numOps == 1);
-                    printf("asd %u\n", opType[0]);
-                    assert(false);
+                    // pull (variable)
+                    assert(sp > 0);
+                    setVar(vals[0], stackMem[--sp]);
                     break;
-                }*/
+                }
                 default:
                     printf("\n\n");
                     dumpMem(oldPc, 32);
