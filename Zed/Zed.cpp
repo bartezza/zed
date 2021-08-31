@@ -610,6 +610,22 @@ int main(int argc, char** argv) {
         return 0;
     };
 
+    auto executeRet = [&](uint16_t val) {
+        assert(curCall > 0);
+        // decrement call index
+        --curCall;
+        // get store variable
+        uint8_t st = stackMem[callsPtr[curCall] + CALLFRAME_OFF_STORE_VAR];
+        // get where to return to
+        pc = stackMem[callsPtr[curCall] + CALLFRAME_OFF_RET];
+        // set stack pointer to old location, before the CALL
+        sp = callsPtr[curCall];
+        // store value
+        // NOTE: this is done after having reset the stack since st could be 0,
+        // meaning to push the return value onto the stack
+        setVar(st, val);
+    };
+
     auto readBranchInfoAndJump = [&](bool condition) {
         // read branch info
         // bit7 == 0 => jump if false, else jump if true
@@ -618,23 +634,39 @@ int main(int argc, char** argv) {
         uint16_t _b = (uint16_t) mem[pc++];
         printf(" %s", ((_b & BIT7) ? "[TRUE]" : "[FALSE]"));
         // read destination of jump
-        uint32_t _dest;
+        uint16_t _offset;
         if (_b & BIT6) {
-            _dest = pc + (_b & 0b00111111) - 2;
+            // short 6bit jump
+            _offset = _b & 0b00111111;
         }
         else {
             // final offset is 14bit signed integer
-            uint16_t _offset = ((_b & 0b00111111) << 8) | (uint16_t) mem[pc++];
+            _offset = ((_b & 0b00111111) << 8) | (uint16_t) mem[pc++];
             // make sure sign is preserved
             if (_offset & BIT13)
                 _offset |= BIT14 | BIT15;
-            _dest = (int32_t)pc + (int16_t)_offset - 2;
+            
         }
-        printf(" %04X", _dest);
-        // check and eventually jump
+        // eventual destination
+        uint32_t _dest = (int32_t)pc + (int16_t)_offset - 2;
+        // print dest
+        if (_offset == 0) printf(" RFALSE");
+        else if (_offset == 1) printf(" RTRUE");
+        else printf(" %04X", _dest);
+        
+        // check condition
         if (!((condition) ^ ((_b >> 7) & 1))) {
-            // jump
-            pc = _dest;
+            // if 0 means RFALSE, 1 means RTRUE
+            if (_offset == 0) {
+                executeRet(0);
+            }
+            else if (_offset == 1) {
+                executeRet(1);
+            }
+            else {
+                // jump
+                pc = _dest;
+            }
         }
     };
 
@@ -676,6 +708,13 @@ int main(int argc, char** argv) {
             printf(" JE");
             readBranchInfoAndJump(val1 == val2);
             break;
+        case OPC_JG: {
+            printf(" JG");
+            // jg a b ?(label)
+            // Jump if a > b (using a signed 16-bit comparison)
+            readBranchInfoAndJump((int16_t)val1 > (int16_t)val2);
+            break;
+        }
         case OPC_INC_CHK: {
             printf(" INC_CHK");
             assert(isVar1);
@@ -860,22 +899,6 @@ int main(int argc, char** argv) {
             return false;
         }
         return true;
-    };
-
-    auto executeRet = [&](uint16_t val) {
-        assert(curCall > 0);
-        // decrement call index
-        --curCall;
-        // get store variable
-        uint8_t st = stackMem[callsPtr[curCall] + CALLFRAME_OFF_STORE_VAR];
-        // get where to return to
-        pc = stackMem[callsPtr[curCall] + CALLFRAME_OFF_RET];
-        // set stack pointer to old location, before the CALL
-        sp = callsPtr[curCall];
-        // store value
-        // NOTE: this is done after having reset the stack since st could be 0,
-        // meaning to push the return value onto the stack
-        setVar(st, val);
     };
 
 #if 0
@@ -1237,9 +1260,11 @@ int main(int argc, char** argv) {
                 // opcode in bit3-0
                 switch (opcode & 0b00001111) {
                 case OPC_RTRUE:
+                    printf(" RTRUE");
                     executeRet(1);
                     break;
                 case OPC_RFALSE:
+                    printf(" RFALSE");
                     executeRet(0);
                     break;
                 case OPC_PRINT: {
