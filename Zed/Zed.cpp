@@ -1298,6 +1298,18 @@ int main(int argc, char** argv) {
                     printf(" JZ");
                     readBranchInfoAndJump(val == 0);
                     break;
+                case OPC_GET_CHILD: {
+                    printf(" GET_CHILD");
+                    // get_child object -> (result) ?(label)
+                    // Get first object contained in given object, branching if this exists,
+                    // i.e. is not nothing (i.e., is not 0).
+                    uint8_t objId = (uint8_t)val;
+                    ZObject_v1* obj = getObject(objId);
+                    debugPrintObjName(obj);
+                    setVar(mem[pc++], obj->child);
+                    readBranchInfoAndJump(obj->child != 0);
+                    break;
+                }
                 case OPC_GET_PARENT: {
                     printf(" GET_PARENT");
                     // get_parent object -> (result)
