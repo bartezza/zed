@@ -43,7 +43,7 @@ typedef struct ZHeader {
 
 // v1-3
 typedef struct ZObject_v1 {
-    uint32_t attr;
+    uint8_t attr[4];
     uint8_t parent;
     uint8_t sibling;
     uint8_t child;

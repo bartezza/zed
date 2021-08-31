@@ -581,6 +581,16 @@ int main(int argc, char** argv) {
         printf("\n");
     };
 
+    // v1-3
+    auto getObject = [&](uint8_t objIndex) -> const ZObject_v1* {
+        // v1-3
+        assert(header->version <= 3);
+        // TODO: objIndex != 0
+        uint16_t baseObjs = BE16(header->objectsAddress);
+        const ZObject_v1* obj = (const ZObject_v1*)&mem[baseObjs + 31 * 2 + (objIndex - 1) * sizeof(ZObject_v1)];
+        return obj;
+    };
+
     auto execute2OP = [&](uint8_t opcode, uint16_t val1, uint16_t val2, bool isVar1, uint8_t opByte1, bool isVar2, uint8_t opByte2) -> bool {
         // parse and execute opcode
         switch (opcode) {
@@ -604,13 +614,20 @@ int main(int argc, char** argv) {
             printf(" AND");
             setVar(mem[pc++], val1 & val2);
             break;
-        /*case OPC_TEST_ATTR:
+        case OPC_TEST_ATTR: {
             printf(" TEST_ATTR");
-
-            // TODO OP: never jump
-
-            ++pc; // skip branch info
-            break;*/
+            assert(val2 < 32);
+            // put_prop object property value
+            const ZObject_v1* obj = getObject(val1);
+            // get prop header
+            uint16_t curPtr = BE16(obj->props);
+            // DEBUG: print object name
+            puts(" '"); printZText(header, mem.data(), &mem[curPtr + 1]); puts("'");
+            // check attribute and jump
+            uint8_t cond = obj->attr[val2 >> 3] & (1 << (7 - val2 & 0x07));
+            readBranchInfoAndJump(cond);
+            break;
+        }
         case OPC_STORE:
             printf(" STORE");
             setVar((uint8_t)val1, val2);
@@ -675,16 +692,6 @@ int main(int argc, char** argv) {
         // NOTE: this is done after having reset the stack since st could be 0,
         // meaning to push the return value onto the stack
         setVar(st, val);
-    };
-
-    // v1-3
-    auto getObject = [&](uint8_t objIndex) -> const ZObject_v1* {
-        // v1-3
-        assert(header->version <= 3);
-        // TODO: objIndex != 0
-        uint16_t baseObjs = BE16(header->objectsAddress);
-        const ZObject_v1* obj = (const ZObject_v1*)&mem[baseObjs + 31 * 2 + (objIndex - 1) * sizeof(ZObject_v1)];
-        return obj;
     };
 
 #if 0
