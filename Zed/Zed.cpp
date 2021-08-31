@@ -71,22 +71,73 @@
 
 // 1OP
 #define OPC_JZ                      0x00
+#define OPC_GET_SIBLING             0x01
+#define OPC_GET_CHILD               0x02
+#define OPC_GET_PARENT              0x03
+#define OPC_GET_PROP_LEN            0x04
+#define OPC_INC                     0x05
+#define OPC_DEC                     0x06
+#define OPC_PRINT_ADDR              0x07
+#define OPC_CALL_1S                 0x08
+#define OPC_REMOVE_OBJ              0x09
+#define OPC_PRINT_OBJ               0x0A
 #define OPC_RET                     0x0B
 #define OPC_JUMP                    0x0C
+#define OPC_PRINT_PADDR             0x0D
+#define OPC_LOAD                    0x0E
+#define OPC_NOT_1OP                 0x0F
 
 // 0OP
 #define OPC_RTRUE                   0x00
 #define OPC_RFALSE                  0x01
 #define OPC_PRINT                   0x02
+#define OPC_PRINT_RET               0x03
+#define OPC_NOP                     0x04
+#define OPC_SAVE                    0x05
+#define OPC_RESTORE                 0x06
+#define OPC_RESTART                 0x07
+#define OPC_RET_POPPED              0x08
+#define OPC_POP                     0x09
+#define OPC_QUIT                    0x0A
 #define OPC_NEWLINE                 0x0B
+#define OPC_SHOW_STATUS             0x0C
+#define OPC_VERIFY                  0x0D
+#define OPC_EXTENDED                0x0E
+#define OPC_PIRACY                  0x0F
 
 // VAR
+// TODO: add CALL here
 #define OPC_STOREW                  0x01
+#define OPC_STOREB                  0x02
 #define OPC_PUT_PROP                0x03
+#define OPC_SREAD                   0x04
 #define OPC_PRINT_CHAR              0x05
 #define OPC_PRINT_NUM               0x06
+#define OPC_RANDOM                  0x07
 #define OPC_PUSH                    0x08
 #define OPC_PULL                    0x09 // 2OP
+#define OPC_SPLIT_WINDOW            0x0A
+#define OPC_SET_WINDOW              0x0B
+#define OPC_CALL_VS2                0x0C
+#define OPC_ERASE_WINDOW            0x0D
+#define OPC_ERASE_LINE              0x0E
+#define OPC_SET_CURSOR              0x0F
+#define OPC_GET_CURSOR              0x10
+#define OPC_SET_TEXT_STYLE          0x11
+#define OPC_BUFFER_MODE             0x12
+#define OPC_OUTPUT_STREAM           0x13
+#define OPC_INPUT_STREAM            0x14
+#define OPC_SOUND_EFFECT            0x15
+#define OPC_READ_CHAR               0x16
+#define OPC_SCAN_TABLE              0x17
+#define OPC_NOT_VAR                 0x18
+#define OPC_CALL_VN                 0x19
+#define OPC_CALL_VN2                0x1A
+#define OPC_TOKENISE                0x1B
+#define OPC_ENCODE_TEXT             0x1C
+#define OPC_COPY_TABLE              0x1D
+#define OPC_PRINT_TABLE             0x1E
+#define OPC_CHECK_ARG_COUNT         0x1F
 
 // other (full) opcodes
 // VAR
@@ -1175,6 +1226,14 @@ int main(int argc, char** argv) {
                     printf(" JZ");
                     readBranchInfoAndJump(val == 0);
                     break;
+                case OPC_PRINT_OBJ: {
+                    printf(" PRINT_OBJ\n");
+                    // print_obj object
+                    uint8_t objId = (uint8_t)val;
+                    ZObject_v1* obj = getObject(objId);
+                    printf("> '"); printZText(header, mem.data(), &mem[BE16(obj->props) + 1]); printf("'\n");
+                    break;
+                }
                 case OPC_RET: {
                     printf(" RET");
                     executeRet(val);
