@@ -41,6 +41,15 @@ typedef struct ZHeader {
     uint16_t extensionAddress; // 36-37
 } ZHeader;
 
+// v1-3
+typedef struct ZObject_v1 {
+    uint32_t attr;
+    uint8_t parent;
+    uint8_t sibling;
+    uint8_t child;
+    uint16_t props; // byte address
+} ZObject_v1;
+
 #pragma pack(pop)
 
 #endif // _H_ZED_

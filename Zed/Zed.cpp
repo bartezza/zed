@@ -30,6 +30,9 @@
 #define READ16(_addr) \
     (((uint16_t) mem[(_addr)] << 8) | ((uint16_t) mem[(_addr) + 1]))
 
+#define WRITE16(_addr, _val) \
+    { mem[(_addr)] = (uint8_t)(((_val) >> 8) & 0xFF); mem[(_addr) + 1] = (uint8_t)((_val) & 0xFF); }
+
 
 // 2OP
 #define OP_CONST_CONST              0b00000000
@@ -385,6 +388,12 @@ char zsciiToAscii(uint8_t ch) {
     }
 }
 
+void printZText(const ZHeader* header, const uint8_t* mem, const uint8_t* text) {
+    char out[1024];
+    parseZText(header, mem, text, out, sizeof(out), nullptr);
+    puts(out);
+}
+
 
 int main(int argc, char** argv) {
     char cwd[MAX_PATH];
@@ -668,29 +677,15 @@ int main(int argc, char** argv) {
         setVar(st, val);
     };
 
-
-#define DEFINE_2OP_EX(name, func, opType1, opType2) \
-    case OPC_ ## name | OP_ ## opType1 ## _ ## opType2: { \
-        printf("%s", # name); \
-        uint16_t val1 = getOperand_ ## opType1 (); \
-        uint16_t val2 = getOperand_ ## opType2 (); \
-        uint8_t st = mem[pc++]; \
-        setVar(st, (uint16_t)(func)); \
-        printf(" ->"); printVarName(st); printf("\n"); \
-        break; \
-    }
-
-#define DEFINE_2OP(name, func) \
-    DEFINE_2OP_EX(name, (func), CONST, CONST) \
-    DEFINE_2OP_EX(name, (func), CONST, VAR) \
-    DEFINE_2OP_EX(name, (func), VAR, CONST) \
-    DEFINE_2OP_EX(name, (func), VAR, VAR)
-
-#define OPC_NOT_IMPLEMENTED \
-    { dumpMem(pc - 1, 32); \
-    printf("ERROR: Opcode %u not implemented yet (%02X)\n", opcode, opcode); \
-    return 1; }
-
+    // v1-3
+    auto getObject = [&](uint8_t objIndex) -> const ZObject_v1* {
+        // v1-3
+        assert(header->version <= 3);
+        // TODO: objIndex != 0
+        uint16_t baseObjs = BE16(header->objectsAddress);
+        const ZObject_v1* obj = (const ZObject_v1*)&mem[baseObjs + 31 * 2 + (objIndex - 1) * sizeof(ZObject_v1)];
+        return obj;
+    };
 
 #if 0
     uint16_t addr = BE16(header->abbrevAddress) + 1 * 2;
@@ -715,17 +710,6 @@ int main(int argc, char** argv) {
 #endif
 
 #if 0
-
-#pragma pack(push, 1)
-    // v1-3
-    typedef struct ZObject {
-        uint32_t attr;
-        uint8_t parent;
-        uint8_t sibling;
-        uint8_t child;
-        uint16_t props; // byte address
-    } ZObject;
-#pragma pack(pop)
 
     assert(sizeof(ZObject) == 9);
 
@@ -894,7 +878,7 @@ int main(int argc, char** argv) {
         else if (opcode == OPC_EXTENDED) { // only v5+
             // operand count is VAR (see VAR form below)
             // opcode in second byte
-            OPC_NOT_IMPLEMENTED
+            assert(false);
         }
         else if ((opcode & OPC_FORM_MASK) == OPC_FORM_VARIABLE) {
             // if bit5 == 0 => 2OP, else VAR
@@ -962,13 +946,49 @@ int main(int argc, char** argv) {
                     mem[addr + 1] = vals[2] & 0xFF;
                     break;
                 }
-                /*case OPC_PUT_PROP: {
-                    printf(" PUT_PROP (TODO!)");
-
-                    // TODO OP
-
+                case OPC_PUT_PROP: {
+                    printf(" PUT_PROP");
+                    // put_prop object property value
+                    const ZObject_v1* obj = getObject(vals[0]);
+                    // get prop header
+                    uint16_t curPtr = BE16(obj->props);
+                    // DEBUG: print object name
+                    puts(" '"); printZText(header, mem.data(), &mem[curPtr + 1]); puts("'");
+                    // skip name of object
+                    curPtr += 1 + mem[curPtr] * 2;
+                    // read properties
+                    while (1) {
+                        // read header
+                        uint8_t propHead = mem[curPtr];
+                        // end of property list?
+                        if (propHead == 0) {
+                            // not found
+                            printf("ERROR: Property %02X not found\n", vals[1]);
+                            assert(false);
+                        }
+                        // propHead = 32 times the number of data bytes minus one, plus the property number
+                        uint8_t propNum = propHead & 0b00011111;
+                        uint8_t propSize = (propHead >> 5) + 1;
+                        // check prop num
+                        if (propNum == vals[1]) {
+                            // we can set the value only if size is 1 or 2 bytes
+                            assert((propSize == 1) || (propSize == 2));
+                            //printf("propNum = %02X, propSize = %02X, wanted = %04X\n", propNum, propSize, vals[2]);
+                            // set prop value
+                            if (propSize == 1) {
+                                // set least significant byte
+                                mem[curPtr + 1] = (uint8_t)(vals[2] & 0xFF);
+                            }
+                            else {
+                                WRITE16(curPtr + 1, vals[2]);
+                            }
+                            break;
+                        }
+                        // advance
+                        curPtr += 1 + propSize;
+                    }
                     break;
-                }*/
+                }
                 case OPC_PRINT_CHAR: {
                     printf(" PRINT_CHAR\n");
                     assert(numOps == 1);
