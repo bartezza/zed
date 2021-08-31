@@ -657,6 +657,14 @@ int main(int argc, char** argv) {
         return obj;
     };
 
+    // v1-3
+    auto getPropertyDefault = [&](uint8_t propIndex) -> uint16_t {
+        // v1-3
+        assert(propIndex < 32);
+        uint16_t baseObjs = BE16(header->objectsAddress);
+        return READ16(baseObjs + propIndex * 2);
+    };
+
     auto debugPrintObjName = [&](const ZObject_v1* _obj) {
         printf(" '"); printZText(header, mem.data(), &mem[BE16(_obj->props) + 1]); printf("'");
     };
@@ -699,7 +707,6 @@ int main(int argc, char** argv) {
         case OPC_TEST_ATTR: {
             printf(" TEST_ATTR");
             assert(val2 < 32);
-            // put_prop object property value
             const ZObject_v1* obj = getObject(val1);
             // DEBUG: print object name
             debugPrintObjName(obj);
@@ -781,6 +788,46 @@ int main(int argc, char** argv) {
             // TODO: check that the address lies in static or dynamic memory
             setVar(mem[pc++], mem[(uint32_t)val1 + (uint32_t)val2]);
             break;
+        case OPC_GET_PROP: {
+            printf(" GET_PROP");
+            // get_prop object property -> (result)
+            const ZObject_v1* obj = getObject(val1);
+            // DEBUG: print object name
+            debugPrintObjName(obj);
+            // get prop header
+            uint16_t curPtr = BE16(obj->props);
+            // skip name of object
+            curPtr += 1 + mem[curPtr] * 2;
+            // read properties
+            while (1) {
+                // read header
+                uint8_t propHead = mem[curPtr];
+                // end of property list?
+                if (propHead == 0) {
+                    // not found, return default
+                    setVar(mem[pc++], getPropertyDefault(val2));
+                    break;
+                }
+                // propHead = 32 times the number of data bytes minus one, plus the property number
+                uint8_t propNum = propHead & 0b00011111;
+                uint8_t propSize = (propHead >> 5) + 1;
+                // check prop num
+                if (propNum == val2) {
+                    // we can get the value only if size is 1 or 2 bytes
+                    assert((propSize == 1) || (propSize == 2));
+                    // get prop value
+                    if (propSize == 1) {
+                        setVar(mem[pc++], mem[curPtr + 1]);
+                    } else {
+                        setVar(mem[pc++], READ16(curPtr + 1));
+                    }
+                    break;
+                }
+                // advance
+                curPtr += 1 + propSize;
+            }
+            break;
+        }
         case OPC_ADD:
             printf(" ADD");
             setVar(mem[pc++], (uint16_t)((int16_t)val1 + (int16_t)val2));
