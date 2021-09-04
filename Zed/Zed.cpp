@@ -1,10 +1,12 @@
 
 #include <cstdio>
 #include <cassert>
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
+#include <cstdarg>
+#include <cstring>
 #include "Zed.h"
-#include <vector>
+
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h> // for DebugBreak
 
 
 #define BIT0        0b00000001
@@ -28,11 +30,15 @@
     ((((w) & 0xFF) << 8) | (((w) >> 8) & 0xFF))
 
 #define READ16(_addr) \
-    (((uint16_t) mem[(_addr)] << 8) | ((uint16_t) mem[(_addr) + 1]))
+    (((uint16_t) m_state.mem[(_addr)] << 8) | ((uint16_t) m_state.mem[(_addr) + 1]))
 
 #define WRITE16(_addr, _val) \
-    { mem[(_addr)] = (uint8_t)(((_val) >> 8) & 0xFF); mem[(_addr) + 1] = (uint8_t)((_val) & 0xFF); }
+    { m_state.mem[(_addr)] = (uint8_t)(((_val) >> 8) & 0xFF); m_state.mem[(_addr) + 1] = (uint8_t)((_val) & 0xFF); }
 
+
+#define OPC_FORM_MASK        0b11000000
+#define OPC_FORM_VARIABLE    0b11000000
+#define OPC_FORM_SHORT       0b10000000
 
 // 2OP
 #define OP_CONST_CONST              0b00000000
@@ -102,11 +108,11 @@
 #define OPC_NEWLINE                 0x0B
 #define OPC_SHOW_STATUS             0x0C
 #define OPC_VERIFY                  0x0D
-#define OPC_EXTENDED                0x0E
+// #define OPC_EXTENDED                0x0E
 #define OPC_PIRACY                  0x0F
 
 // VAR
-// TODO: add CALL here
+#define OPC_CALL                    0x00
 #define OPC_STOREW                  0x01
 #define OPC_STOREB                  0x02
 #define OPC_PUT_PROP                0x03
@@ -141,7 +147,6 @@
 
 // other (full) opcodes
 // VAR
-#define OPC_CALL                    224
 #define OPC_EXTENDED                0xBE
 
 #define OPTYPE_LARGE_CONST          0x00
@@ -160,109 +165,119 @@
         (2 * _addr)
 
 
-const char* g_opcodes2OP[] = {
-    "INVALID",
-    "JE", // 0x01
-    "JL",
-    "JG",
-    "DEC_CHK",
-    "INC_CHK", // 0x05
-    "JIN",
-    "TEST",
-    "OR",
-    "AND",
-    "TEST_ATTR", // 0x0A
-    "SET_ATTR",
-    "CLEAR_ATTR",
-    "STORE",
-    "INSERT_OBJ",
-    "LOADW",
-    "LOADB", // 0x10
-    "GET_PROP",
-    "GET_PROP_ADDR",
-    "GET_NEXT_PROP",
-    "ADD",
-    "SUB", // 0x15
-    "MUL",
-    "DIV",
-    "MOD",
-    "CALL_2S",
-    "CALL_2N", // 0x1A
-    "SET_COLOUR",
-    "THROW"
+#define OPF_STORE               BIT0
+#define OPF_BRANCH              BIT1
+#define OPF_OBJ1                BIT2  // operand1 is object
+#define OPF_OBJ2                BIT3  // operand2 is object
+
+typedef struct ZOpcodeInfo {
+    const char* name;
+    uint8_t flags;
+} ZOpcodeInfo;
+
+ZOpcodeInfo g_opcodes2OP[] = {
+    {"INVALID", 0},
+    {"JE", OPF_BRANCH}, // 0x01
+    {"JL", OPF_BRANCH},
+    {"JG", OPF_BRANCH},
+    {"DEC_CHK", OPF_BRANCH},
+    {"INC_CHK", OPF_BRANCH}, // 0x05
+    {"JIN", OPF_BRANCH | OPF_OBJ1 | OPF_OBJ2},
+    {"TEST", OPF_BRANCH},
+    {"OR", OPF_STORE},
+    {"AND", OPF_STORE},
+    {"TEST_ATTR", OPF_BRANCH | OPF_OBJ1}, // 0x0A
+    {"SET_ATTR", OPF_OBJ1},
+    {"CLEAR_ATTR", OPF_OBJ1},
+    {"STORE", 0},
+    {"INSERT_OBJ", OPF_OBJ1},
+    {"LOADW", OPF_STORE},
+    {"LOADB", OPF_STORE}, // 0x10
+    {"GET_PROP", OPF_STORE | OPF_OBJ1},
+    {"GET_PROP_ADDR", OPF_STORE | OPF_OBJ1},
+    {"GET_NEXT_PROP", OPF_STORE | OPF_OBJ1},
+    {"ADD", OPF_STORE},
+    {"SUB", OPF_STORE}, // 0x15
+    {"MUL", OPF_STORE},
+    {"DIV", OPF_STORE},
+    {"MOD", OPF_STORE},
+    {"CALL_2S", OPF_STORE},
+    {"CALL_2N", 0}, // 0x1A
+    {"SET_COLOUR", 0},
+    {"THROW", 0}
 };
 
-const char* g_opcodes1OP[] = {
-    "JS", // 0x00
-    "GET_SIBLING",
-    "GET_CHILD",
-    "GET_PARENT",
-    "GET_PROP_LEN",
-    "INC", // 0x05
-    "DEC",
-    "PRINT_ADDR",
-    "CALL_1S",
-    "REMOVE_OBJ",
-    "PRINT_OBJ", // 0x0A
-    "RET",
-    "JUMP",
-    "PRINT_PADDR",
-    "LOAD",
-    "NOT" // 0x0F v1-4, CALL_1N v5
+ZOpcodeInfo g_opcodes1OP[] = {
+    {"JS", OPF_BRANCH}, // 0x00
+    {"GET_SIBLING", OPF_BRANCH | OPF_STORE | OPF_OBJ1},
+    {"GET_CHILD", OPF_BRANCH | OPF_STORE | OPF_OBJ1},
+    {"GET_PARENT", OPF_STORE | OPF_OBJ1},
+    {"GET_PROP_LEN", OPF_STORE | OPF_OBJ1},
+    {"INC", 0}, // 0x05
+    {"DEC", 0},
+    {"PRINT_ADDR", 0},
+    {"CALL_1S", OPF_STORE},
+    {"REMOVE_OBJ", OPF_OBJ1},
+    {"PRINT_OBJ", OPF_OBJ1}, // 0x0A
+    {"RET", 0},
+    {"JUMP", 0},
+    {"PRINT_PADDR", 0},
+    {"LOAD", OPF_STORE},
+    {"NOT", OPF_STORE} // 0x0F v1-4, CALL_1N v5
 };
 
-const char* g_opcodes0OP[] = {
-    "RTRUE", // 0x00
-    "RFALSE",
-    "PRINT",
-    "PRINT_RET",
-    "NOP", // only v1
-    "SAVE", // 0x05, v1-4, then illegal
-    "RESTORE", // v1-4, then illegal
-    "RESTART",
-    "RET_POPPED",
-    "POP", // v1-4, CATCH v5-6
-    "QUIT", // 0x0A
-    "NEW_LINE",
-    "SHOW_STATUS", // v3, then illegal
-    "VERIFY", // v3+
-    "EXTENDED", // v5+
-    "PIRACY" // 0x0F, v5 only
+ZOpcodeInfo g_opcodes0OP[] = {
+    {"RTRUE", 0}, // 0x00
+    {"RFALSE", 0},
+    {"PRINT", 0},
+    {"PRINT_RET", 0},
+    {"NOP", 0}, // only v1
+    {"SAVE", OPF_BRANCH}, // 0x05, v1-4, then illegal
+    {"RESTORE", OPF_BRANCH}, // v1-4, then illegal
+    {"RESTART", 0},
+    {"RET_POPPED", 0},
+    {"POP", 0}, // v1-4, CATCH v5-6
+    {"QUIT", 0}, // 0x0A
+    {"NEW_LINE", 0},
+    {"SHOW_STATUS", 0}, // v3, then illegal
+    {"VERIFY", OPF_BRANCH}, // v3+
+    {"EXTENDED", 0}, // v5+
+    {"PIRACY", OPF_BRANCH} // 0x0F, v5 only
 };
 
-const char* g_opcodesVAR[] = {
-    "CALL", // 0x00, CALL_VS v4+
-    "STOREW",
-    "STOREB",
-    "PUT_PROP",
-    "SREAD", // v1-4, AREAD v5+
-    "PRINT_CHAR", // 0x05
-    "PRINT_NUM",
-    "RANDOM",
-    "PUSH",
-    "PULL",
-    "SPLIT_WINDOW", // 0x0A, v3+
-    "SET_WINDOW", // v3+
-    "CALL_VS2", // v4+
-    "ERASE_WINDOW", // v4+
-    "ERASE_LINE", // v4/6
-    "SET_CURSOR", // v4
-    "GET_CURSOR", // 0x10, v4/6
-    "SET_TEXT_STYLE", // v4
-    "BUFFER_MODE", // v4
-    "OUTPUT_STREAM", // v3
-    "INPUT_STREAM", // v3
-    "SOUND_EFFECT", // 0x15, v3
-    "READ_CHAR", // v4
-    "SCAN_TABLE", // v4
-    "NOT", // v5
-    "CALL_VN", // v5
-    "CALL_VN2", // 0x1A, v5
-    "TOKENISE", // v5
-    "ENCODE_TEXT", // v5
-    "COPY_TABLE", // v5
-    "PRINT_TABLE", // v5
-    "CHECK_ARG_COUNT" // 0x1F, v5
+ZOpcodeInfo g_opcodesVAR[] = {
+    {"CALL", OPF_STORE}, // 0x00, CALL_VS v4+
+    {"STOREW", 0},
+    {"STOREB", 0},
+    {"PUT_PROP", 0},
+    {"SREAD", 0}, // v1-4, AREAD v5+
+    {"PRINT_CHAR", 0}, // 0x05
+    {"PRINT_NUM", 0},
+    {"RANDOM", OPF_STORE},
+    {"PUSH", 0},
+    {"PULL", 0},
+    {"SPLIT_WINDOW", 0}, // 0x0A, v3+
+    {"SET_WINDOW", 0}, // v3+
+    {"CALL_VS2", OPF_STORE}, // v4+
+    {"ERASE_WINDOW", 0}, // v4+
+    {"ERASE_LINE", 0}, // v4/6
+    {"SET_CURSOR", 0}, // v4
+    {"GET_CURSOR", 0}, // 0x10, v4/6
+    {"SET_TEXT_STYLE", 0}, // v4
+    {"BUFFER_MODE", 0}, // v4
+    {"OUTPUT_STREAM", 0}, // v3
+    {"INPUT_STREAM", 0}, // v3
+    {"SOUND_EFFECT", 0}, // 0x15, v3
+    {"READ_CHAR", OPF_STORE}, // v4
+    {"SCAN_TABLE", OPF_STORE | OPF_BRANCH}, // v4
+    {"NOT", OPF_STORE}, // v5
+    {"CALL_VN", 0}, // v5
+    {"CALL_VN2", 0}, // 0x1A, v5
+    {"TOKENISE", 0}, // v5
+    {"ENCODE_TEXT", 0}, // v5
+    {"COPY_TABLE", 0}, // v5
+    {"PRINT_TABLE", 0}, // v5
+    {"CHECK_ARG_COUNT", OPF_BRANCH} // 0x1F, v5
 };
 
 // TODO: ext table of opcodes
@@ -315,10 +330,38 @@ const char g_zalphabets[3 * 26 + 1] = {
 #define ZCHAR_SINGLE_CLICK  254
 
 
-int parseZText(const ZHeader* header, const uint8_t* mem, const uint8_t* text, char* out, uint32_t outSize, uint32_t* outTextBytesRead, bool enableAbbrev = true);
+void Zed::copyStory(const uint8_t* mem, size_t memSize) {
+    // alloc and copy memory
+    m_state.mem.resize(memSize);
+    memcpy(&m_state.mem[0], mem, memSize);
+    // reset state
+    reset();
+}
 
-int parseZCharacters(const ZHeader * header, const uint8_t * mem, const uint8_t *buf, uint32_t numBuf, char* out, uint32_t outSize, bool enableAbbrev = true) {
+void Zed::reset() {
+    m_state.reset();
 
+    debugPrintf("highMemory = %04X, staticMemory = %04X\n", BE16(m_state.header->highMemory), BE16(m_state.header->staticMemory));
+    debugPrintf("dict = %04X, objects = %04X, globals = %04X\n", BE16(m_state.header->dictionaryAddress), BE16(m_state.header->objectsAddress), BE16(m_state.header->globalsAddress));
+    debugPrintf("initPC = %04X\n", BE16(m_state.header->initPC));
+}
+
+void ZMachineState::reset() {
+    header = (const ZHeader*)&mem[0];
+
+    pc = BE16(header->initPC);
+
+    callsPtr.resize(1024);
+    curCall = 0;
+
+    stackMem.resize(64 * 1024);
+    sp = 0;
+
+    // CHECK
+    assert(header->version <= 3);
+}
+
+int Zed::parseZCharacters(const uint8_t *buf, uint32_t numBuf, char* out, uint32_t outSize, bool enableAbbrev) {
     // TODO: change this to output ZSCII chars (not assuming ASCII as output)
 
     // NOTE: the code below is for version >= 3 only
@@ -357,12 +400,12 @@ int parseZCharacters(const ZHeader * header, const uint8_t * mem, const uint8_t 
             uint8_t abbrevIndex = 32 * (curCh - 1) + buf[i + 1];
             if (enableAbbrev) {
                 // read corresponding abbreviation location
-                uint32_t addr = BE16(header->abbrevAddress) + abbrevIndex * 2;
+                uint32_t addr = BE16(m_state.header->abbrevAddress) + abbrevIndex * 2;
                 // NOTE: this is a word address (so we need to multiply it by 2)
                 uint32_t addr2 = READ16(addr) * 2;
                 // printf("[DEBUG] abbrevIndex = %u, addr = %04X, addr2 = %04X\n", abbrevIndex, addr, addr2);
                 // print abbreviation at location
-                int ret = parseZText(header, mem, &mem[addr2], &out[curOut], outSize - curOut, nullptr, false);
+                int ret = parseZText(&m_state.mem[addr2], &out[curOut], outSize - curOut, nullptr, false);
                 // advance curOut according to the abbreviation
                 curOut += ret;
             }
@@ -389,7 +432,7 @@ int parseZCharacters(const ZHeader * header, const uint8_t * mem, const uint8_t 
     return curOut;
 }
 
-int parseZText(const ZHeader* header, const uint8_t* mem, const uint8_t* text, char* out, uint32_t outSize, uint32_t* outTextBytesRead, bool enableAbbrev) {
+int Zed::parseZText(const uint8_t* text, char* out, uint32_t outSize, uint32_t* outTextBytesRead, bool enableAbbrev) {
 
     /*
     --first byte-------   --second byte---
@@ -432,7 +475,7 @@ int parseZText(const ZHeader* header, const uint8_t* mem, const uint8_t* text, c
     if (outTextBytesRead)
         *outTextBytesRead = i + 2; // skip last 2 bytes
 
-    return parseZCharacters(header, mem, buf, curBuf, out, outSize, enableAbbrev);
+    return parseZCharacters(buf, curBuf, out, outSize, enableAbbrev);
 }
 
 // NOTE: the ZSCII should go to 1023, but in practice 256-1023 are not used
@@ -450,973 +493,963 @@ char zsciiToAscii(uint8_t ch) {
     }
     else {
         assert(false);
-        // return '?';
+        return '?';
     }
 }
 
-void printZText(const ZHeader* header, const uint8_t* mem, const uint8_t* text) {
+void Zed::debugPrintf(const char* fmt, ...) {
+    char buffer[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
+    debugPrint(buffer);
+}
+
+void Zed::debugPrint(const char* text) {
+    if (debugPrintCallback)
+        debugPrintCallback(text);
+    else
+        fputs(text, stdout);
+}
+
+void Zed::errorPrintf(const char* fmt, ...) {
+    char buffer[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
+    errorPrint(buffer);
+}
+
+void Zed::errorPrint(const char* text) {
+    if (errorPrintCallback)
+        errorPrintCallback(text);
+    else {
+        fputs("[ERROR] ", stdout);
+        // fputs(text, stdout);
+        puts(text);
+    }
+}
+
+void Zed::gamePrintf(const char* fmt, ...) {
+    char buffer[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
+    gamePrint(buffer);
+}
+
+void Zed::gamePrint(const char* text) {
+    if (gamePrintCallback)
+        gamePrintCallback(text);
+    else {
+        fputs(text, stdout);
+    }
+}
+
+void Zed::debugZText(const uint8_t* text) {
     char out[1024];
-    parseZText(header, mem, text, out, sizeof(out), nullptr);
-    printf("%s", out);
+    parseZText(text, out, sizeof(out), nullptr);
+    debugPrint(out);
 }
 
+// TODO: remove this?
+void Zed::debugPrintVarName(uint8_t var) {
+    if (var == 0)
+        debugPrint(" (SP)");
+    else if (var <= 0x0F)
+        debugPrintf(" L%02X", var - 1);
+    else
+        debugPrintf(" G%02X", var - 0x10);
+}
 
-int main(int argc, char** argv) {
-    char cwd[MAX_PATH];
-    GetCurrentDirectoryA(sizeof(cwd), cwd);
-
-#if 0 // TEST: parse z-text
-    const uint8_t temp[] = { 0x11, 0xaa, 0x46, 0x34, 0x16, 0x45, 0x9c, 0xa5 };
-    char out[256];
-    int ret = parseZText(temp, out, sizeof(out));
-    printf("=> '%s'\n", out); // should give "Hello.\n"
-    return 1;
-#endif
-
-    // const char* filename = "..\\..\\..\\..\\Data\\zork1-r119-s880429.z3";
-    const char* filename = "..\\..\\..\\..\\Data\\zork1-r88-s840726.z3";
-    FILE* fp = fopen(filename, "rb");
-    if (fp == nullptr) {
-        printf("ERROR: Could not open '%s'\n", filename);
-        return 1;
+uint16_t Zed::getVar(uint8_t idx) {
+    // check which var
+    if (idx == 0) {
+        // pop from stack
+        assert(m_state.sp > 0);
+        return m_state.stackMem[--m_state.sp];
     }
-    fseek(fp, 0, SEEK_END);
-    long size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-
-    std::vector<uint8_t> mem(size);
-    if (fread(&mem[0], 1, size, fp) != size) {
-        printf("ERROR: Could not read %i bytes of story file\n", size);
-        fclose(fp);
-        return 1;
+    else if (idx <= 0x0F) {
+        // local variable
+        assert(m_state.curCall > 0);
+        const uint32_t callPtr = m_state.callsPtr[m_state.curCall - 1];
+        assert((idx - 1) < m_state.stackMem[callPtr + CALLFRAME_OFF_NUM_LOCALS]); // check number of locals
+        return m_state.stackMem[callPtr + CALLFRAME_OFF_LOCALS + idx - 1];
     }
-    fclose(fp);
+    else {
+        // globals
+        uint32_t addr = BE16(m_state.header->globalsAddress) + (idx - 0x10) * 2;
+        return READ16(addr);
+    }
+};
 
 
-    const ZHeader* header = (const ZHeader*)&mem[0];
+void Zed::setVar(uint8_t idx, uint16_t value) {
+    // check which var
+    if (idx == 0) {
+        // push to stack
+        assert(m_state.sp < (m_state.stackMem.size() - 1));
+        m_state.stackMem[m_state.sp++] = value;
+    }
+    else if (idx <= 0x0F) {
+        // local variable
+        assert(m_state.curCall > 0);
+        const uint32_t callPtr = m_state.callsPtr[m_state.curCall - 1];
+        assert((idx - 1) < m_state.stackMem[callPtr + CALLFRAME_OFF_NUM_LOCALS]); // check number of locals
+        m_state.stackMem[callPtr + CALLFRAME_OFF_LOCALS + idx - 1] = value;
+    }
+    else {
+        // globals
+        uint32_t addr = BE16(m_state.header->globalsAddress) + (idx - 0x10) * 2;
+        WRITE16(addr, value);
+    }
+};
 
-    assert(header->version <= 3);
-
-    printf("highMemory = %04X, staticMemory = %04X\n", BE16(header->highMemory), BE16(header->staticMemory));
-    printf("dict = %04X, objects = %04X, globals = %04X\n", BE16(header->dictionaryAddress), BE16(header->objectsAddress), BE16(header->globalsAddress));
-    printf("initPC = %04X\n", BE16(header->initPC));
-
-    uint32_t pc = BE16(header->initPC);
-
-    // long form: bit7 = 0, bit6 = type 1st operand (0 = small constant, 1 = variable),
-    // bit5 = type 2nd operand, bit4-0 = opcode
-
-    const char* opTypes[] = {
-        "large", "small", "var", "(no)"
-    };
-
-    //std::vector<uint8_t> callsMem(16 * 1024);
-    std::vector<uint16_t> callsPtr(1024);
-    uint32_t curCall = 0;
-
-    std::vector<uint16_t> stackMem(64 * 1024);
-    uint32_t sp = 0;
-
-    auto printVarName = [](uint8_t var) {
-        if (var == 0)
-            printf(" (SP)");
-        else if (var <= 0x0F)
-            printf(" L%02X", var - 1);
-        else
-            printf(" G%02X", var - 0x10);
-    };
-
-    auto getVar = [&](uint8_t b) -> uint16_t {
-        // check which var
-        if (b == 0) {
-            // pop from stack
-            assert(sp > 0);
-            return stackMem[--sp];
-        }
-        else if (b <= 0x0F) {
-            // local variable
-            assert(curCall > 0);
-            const uint32_t callPtr = callsPtr[curCall - 1];
-            assert((b - 1) < stackMem[callPtr + CALLFRAME_OFF_NUM_LOCALS]); // check number of locals
-            return stackMem[callPtr + CALLFRAME_OFF_LOCALS + b - 1];
-        }
-        else {
-            // globals
-            uint32_t addr = BE16(header->globalsAddress) + (b - 0x10) * 2;
-            return ((uint16_t)mem[addr] << 8) | ((uint16_t)mem[addr + 1]);
-        }
-    };
-
-    auto setVar = [&](uint8_t var, uint16_t value) {
-        // check which var
-        if (var == 0) {
-            // push to stack
-            assert(sp < (stackMem.size() - 1));
-            stackMem[sp++] = value;
-            printf(" -> (SP)");
-        }
-        else if (var <= 0x0F) {
-            // local variable
-            assert(curCall > 0);
-            const uint32_t callPtr = callsPtr[curCall - 1];
-            assert((var - 1) < stackMem[callPtr + CALLFRAME_OFF_NUM_LOCALS]); // check number of locals
-            stackMem[callPtr + CALLFRAME_OFF_LOCALS + var - 1] = value;
-            printf(" -> L%02X", var - 1);
-        }
-        else {
-            // globals
-            uint32_t addr = BE16(header->globalsAddress) + (var - 0x10) * 2;
-            mem[addr] = (value >> 8) & 0xFF;
-            mem[addr + 1] = value & 0xFF;
-            printf(" -> G%02X", var - 0x10);
-        }
-    };
-
-    auto getOperand_CONST = [&]() {
-        uint8_t _b = mem[pc++];
-        printf(" #%02X", _b);
-        return _b;
-    };
-
-    auto getOperand_VAR = [&]() {
-        uint8_t _b = mem[pc++];
-        uint16_t _val = getVar(_b);
-        printVarName(_b);
+/*
+auto getOperand = [&](uint8_t _opType) -> uint16_t {
+    switch (_opType) {
+    case OPTYPE_LARGE_CONST: {
+        uint8_t b = mem[pc++];
+        uint8_t c = mem[pc++];
+        uint16_t _val = ((uint16_t)b << 8) | (uint16_t)c;
+        printf(" #%04X", _val);
         return _val;
+    }
+    case OPTYPE_SMALL_CONST: {
+        uint16_t _val = (uint16_t)mem[pc++];
+        printf(" #%02X", _val);
+        return _val;
+    }
+    case OPTYPE_VAR: {
+        uint8_t b = mem[pc++];
+        printVarName(b);
+        uint16_t _val = getVar(b);
+        return _val;
+    }
     };
+    assert(false);
+    return 0;
+};
+*/
 
-    auto getOperand = [&](uint8_t _opType) -> uint16_t {
-        switch (_opType) {
-        case OPTYPE_LARGE_CONST: {
-            uint8_t b = mem[pc++];
-            uint8_t c = mem[pc++];
-            uint16_t _val = ((uint16_t)b << 8) | (uint16_t)c;
-            printf(" #%04X", _val);
-            return _val;
-        }
-        case OPTYPE_SMALL_CONST: {
-            uint16_t _val = (uint16_t)mem[pc++];
-            printf(" #%02X", _val);
-            return _val;
-        }
-        case OPTYPE_VAR: {
-            uint8_t b = mem[pc++];
-            printVarName(b);
-            uint16_t _val = getVar(b);
-            return _val;
-        }
-        };
-        assert(false);
-        return 0;
-    };
+void Zed::execRet(uint16_t val) {
+    assert(m_state.curCall > 0);
+    // decrement call index
+    --m_state.curCall;
+    // get store variable
+    uint8_t st = (uint8_t) m_state.stackMem[m_state.callsPtr[m_state.curCall] + CALLFRAME_OFF_STORE_VAR];
+    // get where to return to
+    m_temp.curPc = m_state.stackMem[m_state.callsPtr[m_state.curCall] + CALLFRAME_OFF_RET];
+    // set stack pointer to old location, before the CALL
+    m_state.sp = m_state.callsPtr[m_state.curCall];
+    // store value
+    // NOTE: this is done after having reset the stack since st could be 0,
+    // meaning to push the return value onto the stack
+    setVar(st, val);
+};
 
-    auto executeRet = [&](uint16_t val) {
-        assert(curCall > 0);
-        // decrement call index
-        --curCall;
-        // get store variable
-        uint8_t st = stackMem[callsPtr[curCall] + CALLFRAME_OFF_STORE_VAR];
-        // get where to return to
-        pc = stackMem[callsPtr[curCall] + CALLFRAME_OFF_RET];
-        // set stack pointer to old location, before the CALL
-        sp = callsPtr[curCall];
-        // store value
-        // NOTE: this is done after having reset the stack since st could be 0,
-        // meaning to push the return value onto the stack
-        setVar(st, val);
-    };
+void Zed::readBranchInfo(uint32_t &curPc, bool &jumpCond, uint32_t &dest) const {
+    // read branch info
+    // bit7 == 0 => jump if false, else jump if true
+    // if bit6 == 1 => offset in bit5-0
+    // if bit6 == 0 => offset is 14bit signed bit5-0 first byte + all bits of next byte
+    uint16_t _b = (uint16_t)m_state.mem[curPc++];
+    jumpCond = (_b & BIT7) != 0;
+    // read destination of jump
+    uint16_t offset;
+    if (_b & BIT6) {
+        // short 6bit jump
+        offset = _b & 0b00111111;
+    }
+    else {
+        // final offset is 14bit signed integer
+        offset = ((_b & 0b00111111) << 8) | (uint16_t)m_state.mem[curPc++];
+        // make sure sign is preserved
+        if (offset & BIT13)
+            offset |= BIT14 | BIT15;
+    }
+    // check offset for special cases
+    if (offset <= 1) {
+        // this corresponds to returning true or false
+        dest = offset;
+    }
+    else {
+        // pass the actual eventual destination
+        dest = (int32_t)curPc + (int16_t)offset - 2;
+    }
+}
 
-    auto readBranchInfoAndJump = [&](bool condition) {
-        // read branch info
-        // bit7 == 0 => jump if false, else jump if true
-        // if bit6 == 1 => offset in bit5-0
-        // if bit6 == 0 => offset is 14bit signed bit5-0 first byte + all bits of next byte
-        uint16_t _b = (uint16_t) mem[pc++];
-        printf(" %s", ((_b & BIT7) ? "[TRUE]" : "[FALSE]"));
-        // read destination of jump
-        uint16_t _offset;
-        if (_b & BIT6) {
-            // short 6bit jump
-            _offset = _b & 0b00111111;
+void Zed::disasmBranch(uint32_t& curPc) {
+    // read info
+    bool jumpCond;
+    uint32_t dest;
+    readBranchInfo(curPc, jumpCond, dest);
+    // print jump condition
+    debugPrint(jumpCond ? " [TRUE]" : " [FALSE]");
+    // print dest
+    if (dest == 0) debugPrint(" RFALSE");
+    else if (dest == 1) debugPrint(" RTRUE");
+    else debugPrintf(" %04X", dest);
+}
+
+void Zed::execBranch(bool condition) {
+    // read branch info
+    bool jumpCond;
+    uint32_t dest;
+    readBranchInfo(m_temp.curPc, jumpCond, dest);
+    // check condition
+    if (!((condition) ^ jumpCond)) {
+        // if 0 means RFALSE, 1 means RTRUE
+        if (dest == 0) {
+            execRet(0);
+        }
+        else if (dest == 1) {
+            execRet(1);
         }
         else {
-            // final offset is 14bit signed integer
-            _offset = ((_b & 0b00111111) << 8) | (uint16_t) mem[pc++];
-            // make sure sign is preserved
-            if (_offset & BIT13)
-                _offset |= BIT14 | BIT15;
-            
+            // jump
+            m_temp.curPc = dest;
         }
-        // eventual destination
-        uint32_t _dest = (int32_t)pc + (int16_t)_offset - 2;
-        // print dest
-        if (_offset == 0) printf(" RFALSE");
-        else if (_offset == 1) printf(" RTRUE");
-        else printf(" %04X", _dest);
-        
-        // check condition
-        if (!((condition) ^ ((_b >> 7) & 1))) {
-            // if 0 means RFALSE, 1 means RTRUE
-            if (_offset == 0) {
-                executeRet(0);
-            }
-            else if (_offset == 1) {
-                executeRet(1);
+    }
+};
+
+/*
+auto dumpMem = [&](uint32_t _pc, uint32_t _size) {
+    for (uint32_t i = 0; i < _size; ++i) {
+        printf("%02X ", mem[_pc + i]);
+        if (((i + 1) % 8) == 0)
+            printf("\n");
+    }
+    printf("\n");
+};
+*/
+
+// v1-3
+ZObject_v1* Zed::getObject(uint16_t objIndex) {
+    // v1-3
+    assert(m_state.header->version <= 3);
+    // TODO: objIndex != 0
+    uint16_t baseObjs = BE16(m_state.header->objectsAddress);
+    ZObject_v1* obj = (ZObject_v1*)&m_state.mem[baseObjs + 31 * 2 + (objIndex - 1) * sizeof(ZObject_v1)];
+    return obj;
+}
+
+// v1-3
+uint16_t Zed::getPropertyDefault(uint16_t propIndex) {
+    // v1-3
+    assert(propIndex < 32);
+    uint16_t baseObjs = BE16(m_state.header->objectsAddress);
+    return READ16(baseObjs + propIndex * 2);
+}
+
+void Zed::debugPrintObjName(const ZObject_v1* obj) {
+    debugPrint(" '"); debugZText(&m_state.mem[BE16(obj->props) + 1]); debugPrint("'");
+}
+
+bool Zed::exec0OPInstruction(uint8_t opcode) {
+    switch (opcode & 0b00001111) {
+    case OPC_RTRUE:
+        execRet(1);
+        break;
+    case OPC_RFALSE:
+        execRet(0);
+        break;
+    case OPC_PRINT: {
+        char out[1024];
+        uint32_t bytesRead = 0;
+        int curOut = parseZText(&m_state.mem[m_temp.curPc], out, sizeof(out), &bytesRead);
+        m_temp.curPc += bytesRead;
+        gamePrint(out);
+        break;
+    }
+    case OPC_NEWLINE: {
+        gamePrint("\n");
+        break;
+    }
+    default:
+        errorPrintf("Short 0OP opcode %02X (%s) not implemented yet (op = %u)",
+            opcode & 0b00001111, g_opcodes0OP[opcode & 0b00001111].name, opcode);
+        return false;
+    }
+    return true;
+}
+
+bool Zed::exec1OPInstruction(uint8_t opcode) {
+    const uint16_t val = m_temp.opVals[0];
+    switch (opcode & 0b00001111) {
+    case OPC_JZ:
+        execBranch(val == 0);
+        break;
+    case OPC_GET_SIBLING: {
+        // get_sibling object -> (result) ?(label)
+        // Get next object in tree, branching if this exists, i.e.is not 0.
+        uint8_t objId = (uint8_t)val;
+        ZObject_v1* obj = getObject(objId);
+        //debugPrintObjName(obj);
+        setVar(m_state.mem[m_temp.curPc++], obj->sibling);
+        execBranch(obj->sibling != 0);
+        break;
+    }
+    case OPC_GET_CHILD: {
+        // get_child object -> (result) ?(label)
+        // Get first object contained in given object, branching if this exists,
+        // i.e. is not nothing (i.e., is not 0).
+        uint8_t objId = (uint8_t)val;
+        ZObject_v1* obj = getObject(objId);
+        //debugPrintObjName(obj);
+        setVar(m_state.mem[m_temp.curPc++], obj->child);
+        execBranch(obj->child != 0);
+        break;
+    }
+    case OPC_GET_PARENT: {
+        // get_parent object -> (result)
+        uint8_t objId = (uint8_t)val;
+        ZObject_v1* obj = getObject(objId);
+        //debugPrintObjName(obj);
+        setVar(m_state.mem[m_temp.curPc++], obj->parent);
+        break;
+    }
+    case OPC_PRINT_OBJ: {
+        // print_obj object
+        uint8_t objId = (uint8_t)val;
+        ZObject_v1* obj = getObject(objId);
+        char out[1024];
+        parseZText(&m_state.mem[BE16(obj->props) + 1], out, sizeof(out), nullptr);
+        gamePrint(out);
+        break;
+    }
+    case OPC_RET: {
+        execRet(val);
+        break;
+    }
+    case OPC_JUMP: {
+        // branch of 16bits signed offset
+        m_temp.curPc = (uint32_t)((int32_t)m_temp.curPc + (int16_t)val - 2);
+        break;
+    }
+    default:
+        errorPrintf("Short 1OP opcode %02X (%s) not implemented yet (op = %u)",
+            opcode & 0b00001111, g_opcodes1OP[opcode & 0b00001111].name, opcode);
+        return false;
+    }
+    return true;
+}
+
+bool Zed::exec2OPInstruction(uint8_t opcode) {
+    // parse and execute opcode
+    const uint16_t val1 = m_temp.opVals[0];
+    const uint16_t val2 = m_temp.opVals[1];
+    switch (opcode & 0b00011111) {
+    case OPC_JE:
+        // je a b c d ?(label)
+        // Jump if a is equal to any of the subsequent operands.
+        // (Thus @je a never jumps and @je a b jumps if a = b.)
+        // je with just 1 operand is not permitted.
+        assert(m_temp.numOps > 1);
+        if (m_temp.numOps == 2)
+            execBranch(m_temp.opVals[0] == m_temp.opVals[1]);
+        else if (m_temp.numOps == 3)
+            execBranch((m_temp.opVals[0] == m_temp.opVals[1]) || (m_temp.opVals[0] == m_temp.opVals[2]));
+        else
+            execBranch((m_temp.opVals[0] == m_temp.opVals[1]) || (m_temp.opVals[0] == m_temp.opVals[2]) || (m_temp.opVals[0] == m_temp.opVals[3]));
+        break;
+    case OPC_JG: {
+        // jg a b ?(label)
+        // Jump if a > b (using a signed 16-bit comparison)
+        execBranch((int16_t)val1 > (int16_t)val2);
+        break;
+    }
+    case OPC_INC_CHK: {
+        // NOTE: this opcode could be called both as 2OP and as VAR. when called as 2OP, the val1 is
+        // set as a small constant, so we need to get the variable value here.
+        // NOTE: not re-getting var here if already gotten since the getVar could have the side effect
+        // of changing the stack (as getVar(0) means pop value from stack)
+        int16_t curVal;
+        if (m_temp.opTypes[0] == OPTYPE_VAR) {
+            // value already gotten
+            curVal = (int16_t)m_temp.opVals[0];
+        }
+        else {
+            // need to get variable
+            curVal = (int16_t)getVar((uint8_t)m_temp.opVals[0]);
+        }
+        ++curVal;
+        setVar(m_temp.opVars[0], (uint16_t)curVal);
+        execBranch(curVal > (int16_t)val2);
+        break;
+    }
+    case OPC_JIN: {
+        // jin obj1 obj2 ?(label)
+        const ZObject_v1* obj1 = getObject(val1);
+        const ZObject_v1* obj2 = getObject(val2);
+        // DEBUG: print object name
+        //debugPrintObjName(obj1);
+        //debugPrintObjName(obj2);
+        // jump if obj1 is direct child of obj2
+        execBranch(obj1->parent == val2);
+        break;
+    }
+    case OPC_OR:
+        setVar(m_state.mem[m_temp.curPc++], val1 | val2);
+        break;
+    case OPC_AND:
+        setVar(m_state.mem[m_temp.curPc++], val1 & val2);
+        break;
+    case OPC_TEST_ATTR: {
+        assert(val2 < 32);
+        const ZObject_v1* obj = getObject(val1);
+        // DEBUG: print object name
+        //debugPrintObjName(obj);
+        // check attribute and jump
+        uint8_t cond = obj->attr[val2 >> 3] & (1 << (7 - val2 & 0x07));
+        execBranch(cond);
+        break;
+    }
+    case OPC_SET_ATTR: {
+        assert(val2 < 32);
+        // set_attr object attribute
+        ZObject_v1* obj = getObject(val1);
+        // DEBUG: print object name
+        //debugPrintObjName(obj);
+        // set attribute
+        obj->attr[val2 >> 3] |= (1 << (7 - val2 & 0x07));
+        break;
+    }
+    case OPC_STORE:
+        setVar((uint8_t)val1, val2);
+        break;
+    case OPC_INSERT_OBJ: {
+        // insert_obj object destination
+        assert(val1 < 256);
+        assert(val2 < 256);
+        uint8_t objId = (uint8_t)val1;
+        uint8_t destId = (uint8_t)val2;
+        ZObject_v1* obj = getObject(objId);
+        ZObject_v1* dest = getObject(destId);
+
+        // DEBUG: print object names
+        //debugPrintObjName(obj);
+        //debugPrintObjName(dest);
+            
+        // if obj already belongs to a hierarchy of objects we need to fix it
+        if (obj->parent != 0) {
+            // check if obj is first child of its parent
+            ZObject_v1* objParent = getObject(obj->parent);
+            if (objParent->child == objId) {
+                // easy, just set obj sibling as new first child
+                objParent->child = obj->sibling;
             }
             else {
-                // jump
-                pc = _dest;
-            }
-        }
-    };
-
-    auto dumpMem = [&](uint32_t _pc, uint32_t _size) {
-        for (uint32_t i = 0; i < _size; ++i) {
-            printf("%02X ", mem[_pc + i]);
-            if (((i + 1) % 8) == 0)
-                printf("\n");
-        }
-        printf("\n");
-    };
-
-    // v1-3
-    auto getObject = [&](uint8_t objIndex) -> ZObject_v1* {
-        // v1-3
-        assert(header->version <= 3);
-        // TODO: objIndex != 0
-        uint16_t baseObjs = BE16(header->objectsAddress);
-        ZObject_v1* obj = (ZObject_v1*)&mem[baseObjs + 31 * 2 + (objIndex - 1) * sizeof(ZObject_v1)];
-        return obj;
-    };
-
-    // v1-3
-    auto getPropertyDefault = [&](uint8_t propIndex) -> uint16_t {
-        // v1-3
-        assert(propIndex < 32);
-        uint16_t baseObjs = BE16(header->objectsAddress);
-        return READ16(baseObjs + propIndex * 2);
-    };
-
-    auto debugPrintObjName = [&](const ZObject_v1* _obj) {
-        printf(" '"); printZText(header, mem.data(), &mem[BE16(_obj->props) + 1]); printf("'");
-    };
-
-    auto execute2OP = [&](uint8_t opcode, uint16_t val1, uint16_t val2, bool isVar1, uint8_t opByte1, bool isVar2, uint8_t opByte2) -> bool {
-        // parse and execute opcode
-        switch (opcode) {
-        case OPC_JE:
-            printf(" JE");
-            readBranchInfoAndJump(val1 == val2);
-            break;
-        case OPC_JG: {
-            printf(" JG");
-            // jg a b ?(label)
-            // Jump if a > b (using a signed 16-bit comparison)
-            readBranchInfoAndJump((int16_t)val1 > (int16_t)val2);
-            break;
-        }
-        case OPC_INC_CHK: {
-            printf(" INC_CHK");
-            assert(isVar1);
-            int16_t newVal = (int16_t)val1 + (int16_t)1;
-            setVar(opByte1, (uint16_t)(newVal));
-            readBranchInfoAndJump(newVal > (int16_t)val2);
-            break;
-        }
-        case OPC_JIN: {
-            printf(" JIN");
-            // jin obj1 obj2 ?(label)
-            const ZObject_v1* obj1 = getObject(val1);
-            const ZObject_v1* obj2 = getObject(val2);
-            // DEBUG: print object name
-            debugPrintObjName(obj1);
-            debugPrintObjName(obj2);
-            // jump if obj1 is direct child of obj2
-            readBranchInfoAndJump(obj1->parent == val2);
-            break;
-        }
-        case OPC_OR:
-            printf(" OR");
-            setVar(mem[pc++], val1 | val2);
-            break;
-        case OPC_AND:
-            printf(" AND");
-            setVar(mem[pc++], val1 & val2);
-            break;
-        case OPC_TEST_ATTR: {
-            printf(" TEST_ATTR");
-            assert(val2 < 32);
-            const ZObject_v1* obj = getObject(val1);
-            // DEBUG: print object name
-            debugPrintObjName(obj);
-            // check attribute and jump
-            uint8_t cond = obj->attr[val2 >> 3] & (1 << (7 - val2 & 0x07));
-            readBranchInfoAndJump(cond);
-            break;
-        }
-        case OPC_SET_ATTR: {
-            printf(" SET_ATTR");
-            assert(val2 < 32);
-            // set_attr object attribute
-            ZObject_v1* obj = getObject(val1);
-            // DEBUG: print object name
-            debugPrintObjName(obj);
-            // set attribute
-            obj->attr[val2 >> 3] |= (1 << (7 - val2 & 0x07));
-            break;
-        }
-        case OPC_STORE:
-            printf(" STORE");
-            setVar((uint8_t)val1, val2);
-            break;
-        case OPC_INSERT_OBJ: {
-            printf(" INSERT_OBJ");
-            // insert_obj object destination
-            assert(val1 < 256);
-            assert(val2 < 256);
-            uint8_t objId = (uint8_t)val1;
-            uint8_t destId = (uint8_t)val2;
-            ZObject_v1* obj = getObject(objId);
-            ZObject_v1* dest = getObject(destId);
-
-            // DEBUG: print object names
-            debugPrintObjName(obj);
-            debugPrintObjName(dest);
-            
-            // if obj already belongs to a hierarchy of objects we need to fix it
-            if (obj->parent != 0) {
-                // check if obj is first child of its parent
-                ZObject_v1* objParent = getObject(obj->parent);
-                if (objParent->child == objId) {
-                    // easy, just set obj sibling as new first child
-                    objParent->child = obj->sibling;
-                }
-                else {
-                    // this means that obj is not first child, but it's somewhere
-                    // in the sibling chain
-                    // check each of them until we find an object pointing to ours
-                    uint8_t curObjId = objParent->child;
-                    ZObject_v1* curObj = getObject(curObjId);
-                    while (curObj->sibling != 0) {
-                        if (curObj->sibling == objId) {
-                            // substitute obj with the next sibling in the chain
-                            curObj->sibling = obj->sibling;
-                            break;
-                        }
+                // this means that obj is not first child, but it's somewhere
+                // in the sibling chain
+                // check each of them until we find an object pointing to ours
+                uint8_t curObjId = objParent->child;
+                ZObject_v1* curObj = getObject(curObjId);
+                while (curObj->sibling != 0) {
+                    if (curObj->sibling == objId) {
+                        // substitute obj with the next sibling in the chain
+                        curObj->sibling = obj->sibling;
+                        break;
                     }
                 }
             }
-            // new sibling is the current first child of dest, which will become
-            // second child
-            obj->sibling = dest->child;
-            // obj is the new first child of dest
-            dest->child = objId;
-            // fix also obj parent
-            obj->parent = destId;
-            break;
         }
-        case OPC_LOADW:
-            printf(" LOADW");
-            // load word at word address
-            // TODO: check that the address lies in static or dynamic memory
-            setVar(mem[pc++], READ16((uint32_t)val1 + (uint32_t)val2 * 2));
-            break;
-        case OPC_LOADB:
-            printf(" LOADB");
-            // load byte at byte address
-            // TODO: check that the address lies in static or dynamic memory
-            setVar(mem[pc++], mem[(uint32_t)val1 + (uint32_t)val2]);
-            break;
-        case OPC_GET_PROP: {
-            printf(" GET_PROP");
-            // get_prop object property -> (result)
-            const ZObject_v1* obj = getObject(val1);
-            // DEBUG: print object name
-            debugPrintObjName(obj);
-            // get prop header
-            uint16_t curPtr = BE16(obj->props);
-            // skip name of object
-            curPtr += 1 + mem[curPtr] * 2;
-            // read properties
-            while (1) {
-                // read header
-                uint8_t propHead = mem[curPtr];
-                // end of property list?
-                if (propHead == 0) {
-                    // not found, return default
-                    setVar(mem[pc++], getPropertyDefault(val2));
-                    break;
-                }
-                // propHead = 32 times the number of data bytes minus one, plus the property number
-                uint8_t propNum = propHead & 0b00011111;
-                uint8_t propSize = (propHead >> 5) + 1;
-                // check prop num
-                if (propNum == val2) {
-                    // we can get the value only if size is 1 or 2 bytes
-                    assert((propSize == 1) || (propSize == 2));
-                    // get prop value
-                    if (propSize == 1) {
-                        setVar(mem[pc++], mem[curPtr + 1]);
-                    } else {
-                        setVar(mem[pc++], READ16(curPtr + 1));
-                    }
-                    break;
-                }
-                // advance
-                curPtr += 1 + propSize;
+        // new sibling is the current first child of dest, which will become
+        // second child
+        obj->sibling = dest->child;
+        // obj is the new first child of dest
+        dest->child = objId;
+        // fix also obj parent
+        obj->parent = destId;
+        break;
+    }
+    case OPC_LOADW:
+        // load word at word address
+        // TODO: check that the address lies in static or dynamic memory
+        setVar(m_state.mem[m_temp.curPc++], READ16((uint32_t)val1 + (uint32_t)val2 * 2));
+        break;
+    case OPC_LOADB:
+        // load byte at byte address
+        // TODO: check that the address lies in static or dynamic memory
+        setVar(m_state.mem[m_temp.curPc++], m_state.mem[(uint32_t)val1 + (uint32_t)val2]);
+        break;
+    case OPC_GET_PROP: {
+        // get_prop object property -> (result)
+        const ZObject_v1* obj = getObject(val1);
+        // DEBUG: print object name
+        //debugPrintObjName(obj);
+        // get prop header
+        uint16_t curPtr = BE16(obj->props);
+        // skip name of object
+        curPtr += 1 + m_state.mem[curPtr] * 2;
+        // read properties
+        while (1) {
+            // read header
+            uint8_t propHead = m_state.mem[curPtr];
+            // end of property list?
+            if (propHead == 0) {
+                // not found, return default
+                setVar(m_state.mem[m_temp.curPc++], getPropertyDefault(val2));
+                break;
             }
-            break;
+            // propHead = 32 times the number of data bytes minus one, plus the property number
+            uint8_t propNum = propHead & 0b00011111;
+            uint8_t propSize = (propHead >> 5) + 1;
+            // check prop num
+            if (propNum == val2) {
+                // we can get the value only if size is 1 or 2 bytes
+                assert((propSize == 1) || (propSize == 2));
+                // get prop value
+                if (propSize == 1) {
+                    setVar(m_state.mem[m_temp.curPc++], m_state.mem[curPtr + 1]);
+                } else {
+                    setVar(m_state.mem[m_temp.curPc++], READ16(curPtr + 1));
+                }
+                break;
+            }
+            // advance
+            curPtr += 1 + propSize;
         }
-        case OPC_ADD:
-            printf(" ADD");
-            setVar(mem[pc++], (uint16_t)((int16_t)val1 + (int16_t)val2));
-            break;
-        case OPC_SUB:
-            printf(" SUB");
-            setVar(mem[pc++], (uint16_t)((int16_t)val1 - (int16_t)val2));
-            break;
-        case OPC_MUL:
-            printf(" MUL");
-            setVar(mem[pc++], (uint16_t)((int16_t)val1 * (int16_t)val2));
-            break;
-        case OPC_DIV:
-            printf(" DIV");
-            if (val2 == 0) {
-                printf("ERROR: Division by zero!\n");
-                return 1;
-            }
-            setVar(mem[pc++], (uint16_t)((int16_t)val1 / (int16_t)val2));
-            break;
-        case OPC_MOD:
-            printf(" MOD");
-            if (val2 == 0) {
-                printf("ERROR: Division by zero!\n");
-                return 1;
-            }
-            setVar(mem[pc++], (uint16_t)((int16_t)val1 % (int16_t)val2));
-            break;
-        default:
+        break;
+    }
+    case OPC_ADD:
+        setVar(m_state.mem[m_temp.curPc++], (uint16_t)((int16_t)val1 + (int16_t)val2));
+        break;
+    case OPC_SUB:
+        setVar(m_state.mem[m_temp.curPc++], (uint16_t)((int16_t)val1 - (int16_t)val2));
+        break;
+    case OPC_MUL:
+        setVar(m_state.mem[m_temp.curPc++], (uint16_t)((int16_t)val1 * (int16_t)val2));
+        break;
+    case OPC_DIV:
+        if (val2 == 0) {
+            errorPrint("Division by zero");
             return false;
         }
-        return true;
-    };
-
-#if 0
-    uint16_t addr = BE16(header->abbrevAddress) + 1 * 2;
-    printf("Abbrevs:\n");
-    dumpMem(BE16(header->abbrevAddress), 32);
-
-    uint32_t addr2 = READ16(addr);
-    //uint16_t addr2 = header->abbrevAddress + mem[addr];
-    printf("addr = %04X, addr2 = %04X\n", addr, addr2);
-
-    char out[1024];
-    int ret;
-    /*dumpMem(addr2, 32);
-    int ret = parseZText(header, mem.data(), &mem[addr2], out, sizeof(out), nullptr, false);
-    printf("'%s'\n", out);*/
-
-    dumpMem(addr2 * 2, 32);
-    ret = parseZText(header, mem.data(), &mem[addr2 * 2], out, sizeof(out), nullptr, false);
-    printf("'%s'\n", out);
-
-    return 1;
-#endif
-
-#if 0
-
-    assert(sizeof(ZObject) == 9);
-
-    uint32_t addr = BE16(header->objectsAddress);
-    // property defaults table
-    // 31 words in v1-3, 63 words in v4+
-    assert(header->version <= 3);
-
-    char out[1024];
-
-    // v1-3: 255 objects at most, 9bytes each
-    for (int i = 1; i <= 255; ++i) {
-        const ZObject* obj = (const ZObject*)&mem[addr + 31 * 2 + (i - 1) * sizeof(ZObject)];
-        printf("%i) attr = %08X, parent = %u, sibling = %u, child = %u, props = %04X\n", i, obj->attr, obj->parent, obj->sibling, obj->child, obj->props);
-        // prop header: text-length (1 byte) + short name (text-length * 2 bytes)
-        uint32_t propHeader = BE16(obj->props);
-        uint16_t nameLen = mem[propHeader] * 2;
-        uint32_t bytesRead = 0;
-        int ret = parseZText(header, mem.data(), &mem[propHeader + 1], out, sizeof(out), &bytesRead);
-        printf("  text-length = %u, name = '%s'\n", nameLen, out);
-        //assert(bytesRead == nameLen);
-        if (bytesRead != nameLen)
-            printf("    => ERROR\n");
+        setVar(m_state.mem[m_temp.curPc++], (uint16_t)((int16_t)val1 / (int16_t)val2));
+        break;
+    case OPC_MOD:
+        if (val2 == 0) {
+            errorPrint("Division by zero");
+            return 1;
+        }
+        setVar(m_state.mem[m_temp.curPc++], (uint16_t)((int16_t)val1 % (int16_t)val2));
+        break;
+    default:
+        errorPrintf("2OP opcode %02X (%s) not implemented yet (op = %u)",
+            opcode & 0b00011111, g_opcodes2OP[opcode & 0b00011111].name, opcode);
+        return false;
     }
+    return true;
+}
 
-    return 1;
-#endif
+void Zed::execCall() {
+    // read where to store the result
+    uint8_t b = m_state.mem[m_temp.curPc++];
+    // execute routine
+    // save call frame ptr
+    m_state.callsPtr[m_state.curCall] = m_state.sp;
+    // store new location (not necessary, but handy for debugging)
+    uint32_t newPc = packedAddressToByte(m_temp.opVals[0]); // packed
+    assert(newPc < m_state.mem.size());
+    m_state.stackMem[m_state.sp++] = newPc; // TODO: here we are saving to 16bit!!!
+    // store old location
+    m_state.stackMem[m_state.sp++] = m_temp.curPc; // pointer to byte after the CALL
+    // store return variable
+    m_state.stackMem[m_state.sp++] = b;
+    // go to new location
+    m_temp.curPc = newPc;
+    // read number of local variables
+    uint8_t numLocals = m_state.mem[m_temp.curPc++];
+    assert(numLocals < 16);
+    m_state.stackMem[m_state.sp++] = numLocals;
+    // read the initial values of the local variables, v1-4
+    // NOTE: locals starts from callsPtr + 2
+    for (uint8_t i = 0; i < numLocals; ++i) {
+        m_state.stackMem[m_state.sp + i] = READ16(m_temp.curPc);
+        m_temp.curPc += 2;
+    }
+    // overwrite them with function arguments
+    for (uint8_t i = 0; i < (m_temp.numOps - 1) && i < numLocals; ++i) {
+        m_state.stackMem[m_state.sp + i] = m_temp.opVals[i + 1];
+    }
+    // advance sp
+    m_state.sp += numLocals;
+    // advance call index
+    ++m_state.curCall;
 
-    while (1) {
-        printf("[%04X] ", pc);
-        // dumpMem(pc, 32);
+    // DEBUG: print call frame
+    uint32_t pp = m_state.callsPtr[m_state.curCall - 1];
+    debugPrintf("Call frame %u: start = %04X, ret = %04X, numLocals = %u\n",
+        m_state.curCall - 1, m_state.stackMem[pp + CALLFRAME_OFF_PC],
+        m_state.stackMem[pp + CALLFRAME_OFF_RET], m_state.stackMem[pp + CALLFRAME_OFF_NUM_LOCALS]);
+    for (uint16_t i = 0; i < m_state.stackMem[pp + CALLFRAME_OFF_NUM_LOCALS]; ++i)
+        debugPrintf("%u) %04X\n", i, m_state.stackMem[pp + CALLFRAME_OFF_LOCALS + i]);
+}
 
-        // if (pc == 0x6F88) DebugBreak();
-
-        uint32_t oldPc = pc;
-        uint8_t opcode = mem[pc++];
-        /*switch (opcode) {
-        case OPC_CALL: {*/
-        if (opcode == OPC_CALL) {
-            printf("CALL");
-            uint8_t b = mem[pc++];
-            uint8_t opType[4] = {
-                (b >> 6) & 0x03,
-                (b >> 4) & 0x03,
-                (b >> 2) & 0x03,
-                b & 0x03
-            };
-
-            uint16_t vals[4] = {};
-            uint8_t variables[4] = {};
-            uint8_t numOps;
-            for (numOps = 0; numOps < 4; ++numOps) {
-                uint8_t opt = opType[numOps];
-                if (opt == OPTYPE_OMITTED) {
-                    // no more valid operands
-                    break;
-                }
-                
-                //vals[numOps] = getOperand(opt);
-
-                switch (opt) {
-                    case OPTYPE_LARGE_CONST: {
-                        uint8_t b = mem[pc++];
-                        uint8_t c = mem[pc++];
-                        uint16_t _val = ((uint16_t)b << 8) | (uint16_t)c;
-                        printf(" #%04X", _val);
-                        vals[numOps] = _val;
-                        break;
-                    }
-                    case OPTYPE_SMALL_CONST: {
-                        uint16_t _val = (uint16_t)mem[pc++];
-                        printf(" #%02X", _val);
-                        vals[numOps] = _val;
-                        break;
-                    }
-                    case OPTYPE_VAR: {
-                        uint8_t b = mem[pc++];
-                        printVarName(b);
-                        uint16_t _val = getVar(b);
-                        variables[numOps] = b;
-                        vals[numOps] = _val;
-                        break;
-                    }
-                }
+bool Zed::execVarInstruction(uint8_t opcode) {
+    switch (opcode & 0b00011111) {
+    case OPC_CALL: {
+        execCall();
+        break;
+    }
+    case OPC_STOREW: {
+        assert(m_temp.numOps == 3);
+        // TODO: check actual address (should be in dynamic memory)
+        uint32_t addr = (uint32_t)m_temp.opVals[0] + (uint32_t)m_temp.opVals[1] * 2;
+        WRITE16(addr, m_temp.opVals[2]);
+        break;
+    }
+    case OPC_PUT_PROP: {
+        // put_prop object property value
+        uint16_t inObj = m_temp.opVals[0];
+        uint16_t inProp = m_temp.opVals[1];
+        uint16_t inValue = m_temp.opVals[2];
+        const ZObject_v1* obj = getObject(inObj);
+        // DEBUG: print object name
+        //debugPrintObjName(obj);
+        // get prop header
+        uint16_t curPtr = BE16(obj->props);
+        // skip name of object
+        curPtr += 1 + m_state.mem[curPtr] * 2;
+        // read properties
+        while (1) {
+            // read header
+            uint8_t propHead = m_state.mem[curPtr];
+            // end of property list?
+            if (propHead == 0) {
+                // not found
+                errorPrintf("Property %02X not found", inProp);
+                assert(false);
+                return false;
             }
-
-            // where to store the result
-            // TODO: handle this
-            b = mem[pc++];
-            printf(" ->"); printVarName(b); printf("\n");
-
-            // execute routine
-            // save call frame ptr
-            callsPtr[curCall] = sp;
-            // store new location (not necessary, but handy for debugging)
-            uint32_t newPc = packedAddressToByte(vals[0]); // packed
-            assert(newPc < mem.size());
-            stackMem[sp++] = newPc; // TOFIX: saving to 16bit
-            // store old location
-            stackMem[sp++] = pc; // pointer to byte after the CALL
-            // store return variable
-            stackMem[sp++] = b;
-            // go to new location
-            pc = newPc;
-            // read number of local variables
-            uint8_t numLocals = mem[pc++];
-            assert(numLocals < 16);
-            stackMem[sp++] = numLocals;
-            // read the initial values of the local variables, v1-4
-            // NOTE: locals starts from callsPtr + 2
-            for (uint8_t i = 0; i < numLocals; ++i) {
-                b = mem[pc++];
-                stackMem[sp + i] = ((uint16_t)b << 8) | ((uint16_t)mem[pc++]);
-            }
-            // overwrite them with function arguments
-            for (uint8_t i = 0; i < (numOps - 1) && i < numLocals; ++i) {
-                stackMem[sp + i] = vals[i + 1];
-            }
-            // advance sp
-            sp += numLocals;
-            // advance call index
-            ++curCall;
-
-            // DEBUG: print call frame
-            uint32_t pp = callsPtr[curCall - 1];
-            printf("Call frame %u: start = %04X, ret = %04X, numLocals = %u\n", curCall - 1, stackMem[pp + CALLFRAME_OFF_PC], stackMem[pp + CALLFRAME_OFF_RET], stackMem[pp + CALLFRAME_OFF_NUM_LOCALS]);
-            for (uint16_t i = 0; i < stackMem[pp + CALLFRAME_OFF_NUM_LOCALS]; ++i)
-                printf("%u) %04X\n", i, stackMem[pp + CALLFRAME_OFF_LOCALS + i]);
-
-            // break;
-        }
-        /*case OPC_ADD | OP_VAR_CONST: {
-            printf("ADD");
-            uint8_t b = mem[pc++];
-            uint16_t val = getVar(b);
-            printVarName(b);
-            uint8_t c = mem[pc++];
-            printf(" #%02X", c);
-            // where to store the result
-            uint8_t st = mem[pc++];
-            setVar(st, (uint16_t)((int16_t)val + (int16_t)c));
-            printf(" ->"); printVarName(st); printf("\n");
-            break;
-        }
-        case OPC_ADD | OP_VAR_VAR: {
-            printf("ADD");
-            uint8_t b = mem[pc++];
-            uint16_t val = getVar(b);
-            printVarName(b);
-            uint8_t c = mem[pc++];
-            uint16_t val2 = getVar(c);
-            printVarName(c);
-            // where to store the result
-            uint8_t st = mem[pc++];
-            setVar(st, (uint16_t)((int16_t)val + (int16_t)val2));
-            printf(" ->"); printVarName(st); printf("\n");
-            break;
-        }*/
-        /*DEFINE_2OP(ADD, (int16_t)val1 + (int16_t)val2);*/
-        //default:
-
-#define OPC_FORM_MASK        0b11000000
-#define OPC_FORM_VARIABLE    0b11000000
-#define OPC_FORM_SHORT       0b10000000
-
-        else if (opcode == OPC_EXTENDED) { // only v5+
-            // operand count is VAR (see VAR form below)
-            // opcode in second byte
-            assert(false);
-        }
-        else if ((opcode & OPC_FORM_MASK) == OPC_FORM_VARIABLE) {
-            // if bit5 == 0 => 2OP, else VAR
-            // opcode in bit4-0
-            // next byte with 4 operand types
-            // 00 = large constant, 01 = small constant, 10 = variable, 11 = omitted
-            // next operands
-            uint8_t b = mem[pc++];
-            uint8_t opType[4] = {
-                (b >> 6) & 0x03,
-                (b >> 4) & 0x03,
-                (b >> 2) & 0x03,
-                b & 0x03
-            };
-
-            uint16_t vals[4] = {};
-            uint8_t variables[4] = {};
-            uint8_t numOps;
-            for (numOps = 0; numOps < 4; ++numOps) {
-                uint8_t opt = opType[numOps];
-                if (opt == OPTYPE_OMITTED) {
-                    // no more valid operands
-                    break;
-                }
-                
-                //vals[numOps] = getOperand(opt);
-
-                switch (opt) {
-                    case OPTYPE_LARGE_CONST: {
-                        uint8_t b = mem[pc++];
-                        uint8_t c = mem[pc++];
-                        uint16_t _val = ((uint16_t)b << 8) | (uint16_t)c;
-                        vals[numOps] = _val;
-                        printf(" #%04X", _val);
-                        break;
-                    }
-                    case OPTYPE_SMALL_CONST: {
-                        uint16_t _val = (uint16_t)mem[pc++];
-                        vals[numOps] = _val;
-                        printf(" #%02X", _val);
-                        break;
-                    }
-                    case OPTYPE_VAR: {
-                        uint8_t b = mem[pc++];
-                        uint16_t _val = getVar(b);
-                        variables[numOps] = b;
-                        vals[numOps] = _val;
-                        printVarName(b);
-                        break;
-                    }
-                }
-            }
-
-            // check if VAR or 2OP
-            if (opcode & BIT5) {
-                // VAR opcode
-                switch (opcode & 0b00011111) {
-                    // TODO: move CALL here
-                case OPC_STOREW: {
-                    printf(" STOREW");
-                    assert(numOps == 3);
-                    // TODO: check actual address (should be in dynamic memory)
-                    uint32_t addr = (uint32_t)vals[0] + (uint32_t)vals[1] * 2;
-                    mem[addr] = (vals[2] >> 8) & 0xFF;
-                    mem[addr + 1] = vals[2] & 0xFF;
-                    break;
-                }
-                case OPC_PUT_PROP: {
-                    printf(" PUT_PROP");
-                    // put_prop object property value
-                    const ZObject_v1* obj = getObject(vals[0]);
-                    // DEBUG: print object name
-                    debugPrintObjName(obj);
-                    // get prop header
-                    uint16_t curPtr = BE16(obj->props);
-                    // skip name of object
-                    curPtr += 1 + mem[curPtr] * 2;
-                    // read properties
-                    while (1) {
-                        // read header
-                        uint8_t propHead = mem[curPtr];
-                        // end of property list?
-                        if (propHead == 0) {
-                            // not found
-                            printf("ERROR: Property %02X not found\n", vals[1]);
-                            assert(false);
-                        }
-                        // propHead = 32 times the number of data bytes minus one, plus the property number
-                        uint8_t propNum = propHead & 0b00011111;
-                        uint8_t propSize = (propHead >> 5) + 1;
-                        // check prop num
-                        if (propNum == vals[1]) {
-                            // we can set the value only if size is 1 or 2 bytes
-                            assert((propSize == 1) || (propSize == 2));
-                            //printf("propNum = %02X, propSize = %02X, wanted = %04X\n", propNum, propSize, vals[2]);
-                            // set prop value
-                            if (propSize == 1) {
-                                // set least significant byte
-                                mem[curPtr + 1] = (uint8_t)(vals[2] & 0xFF);
-                            }
-                            else {
-                                WRITE16(curPtr + 1, vals[2]);
-                            }
-                            break;
-                        }
-                        // advance
-                        curPtr += 1 + propSize;
-                    }
-                    break;
-                }
-                case OPC_PRINT_CHAR: {
-                    printf(" PRINT_CHAR\n");
-                    assert(numOps == 1);
-                    char ch = zsciiToAscii(vals[0]);
-                    printf("> '%c'\n", ch);
-                    break;
-                }
-                case OPC_PRINT_NUM: {
-                    printf(" PRINT_NUM\n");
-                    assert(numOps == 1);
-                    printf("> '%i'\n", (int16_t)vals[0]);
-                    break;
-                }
-                case OPC_PUSH: {
-                    printf(" PUSH\n");
-                    assert(numOps == 1);
-                    // push value
-                    stackMem[sp++] = vals[0];
-                    break;
-                }
-                case OPC_PULL: {
-                    printf(" PULL");
-                    assert(numOps == 1);
-                    // pull (variable)
-                    assert(sp > 0);
-                    setVar(vals[0], stackMem[--sp]);
-                    break;
-                }
-                default:
-                    printf("\n\n");
-                    dumpMem(oldPc, 32);
-                    printf("ERROR: variable VAR opcode %02X (%s) not implemented yet (op = %u)\n",
-                        opcode & 0b00011111, g_opcodesVAR[opcode & 0b00011111], opcode);
-                    return 1;
-                }
-            }
-            else {
-                // handle 2OP
-                // if (oldPc == 0x8EDC) DebugBreak();
-
-                // TODO: handle this better
-                uint8_t opcode2 = opcode & 0b00011111;
-
-                if (opcode2 == OPC_JE) {
-                    printf(" JE");
-                    // je a b c d ?(label)
-                    // Jump if a is equal to any of the subsequent operands.
-                    // (Thus @je a never jumps and @je a b jumps if a = b.)
-                    // je with just 1 operand is not permitted.
-                    assert(numOps > 1);
-                    if (numOps == 2)
-                        readBranchInfoAndJump(vals[0] == vals[1]);
-                    else if (numOps == 3)
-                        readBranchInfoAndJump((vals[0] == vals[1]) || (vals[0] == vals[2]));
-                    else
-                        readBranchInfoAndJump((vals[0] == vals[1]) || (vals[0] == vals[2]) || (vals[0] == vals[3]));
+            // propHead = 32 times the number of data bytes minus one, plus the property number
+            uint8_t propNum = propHead & 0b00011111;
+            uint8_t propSize = (propHead >> 5) + 1;
+            // check prop num
+            if (propNum == inProp) {
+                // we can set the value only if size is 1 or 2 bytes
+                assert((propSize == 1) || (propSize == 2));
+                //printf("propNum = %02X, propSize = %02X, wanted = %04X\n", propNum, propSize, vals[2]);
+                // set prop value
+                if (propSize == 1) {
+                    // set least significant byte
+                    m_state.mem[curPtr + 1] = (uint8_t)(inValue & 0xFF);
                 }
                 else {
-                    assert(numOps == 2);
-                    if (!execute2OP(opcode2, vals[0], vals[1], opType[0] == OPTYPE_VAR, variables[0], opType[1] == OPTYPE_VAR, variables[1])) {
-                        printf("\n\n");
-                        dumpMem(oldPc, 32);
-                        printf("ERROR: variable 2OP opcode %02X (%s) not implemented yet (op = %u)\n",
-                            opcode & 0b00011111, g_opcodes2OP[opcode & 0b00011111], opcode);
-                        return 1;
-                    }
+                    WRITE16(curPtr + 1, inValue);
+                }
+                break;
+            }
+            // advance
+            curPtr += 1 + propSize;
+        }
+        break;
+    }
+    case OPC_PRINT_CHAR: {
+        assert(m_temp.numOps == 1);
+        char ch[2] = {
+            zsciiToAscii((uint8_t)m_temp.opVals[0]),
+            '\0'
+        };
+        gamePrint(ch);
+        break;
+    }
+    case OPC_PRINT_NUM: {
+        assert(m_temp.numOps == 1);
+        gamePrintf("%i", (int16_t)m_temp.opVals[0]);
+        break;
+    }
+    case OPC_PUSH: {
+        assert(m_temp.numOps == 1);
+        // push value
+        m_state.stackMem[m_state.sp++] = m_temp.opVals[0];
+        break;
+    }
+    case OPC_PULL: {
+        assert(m_temp.numOps == 1);
+        // pull (variable)
+        assert(m_state.sp > 0);
+        setVar((uint8_t)m_temp.opVals[0], m_state.stackMem[--m_state.sp]);
+        break;
+    }
+    default:
+        errorPrintf("Variable VAR opcode %02X (%s) not implemented yet (op = %u)",
+            opcode & 0b00011111, g_opcodesVAR[opcode & 0b00011111].name, opcode);
+        return false;
+    }
+    return true;
+}
+
+bool Zed::parseOpcodeAndOperands(ZMachineTemp& temp) const {
+    // read full opcode
+    uint32_t &curPc = temp.curPc;
+    uint8_t opcode = m_state.mem[curPc++];
+    temp.opcode = opcode;
+
+    if (opcode == OPC_EXTENDED) { // only v5+
+        // operand count is VAR (see VAR form below)
+        // opcode in second byte
+        assert(false);
+        return false;
+    }
+    else if ((opcode & OPC_FORM_MASK) == OPC_FORM_VARIABLE) {
+        // if bit5 == 0 => 2OP, else VAR
+        // opcode in bit4-0
+        // next byte with 4 operand types
+        // 00 = large constant, 01 = small constant, 10 = variable, 11 = omitted
+        // next operands
+        uint8_t b = m_state.mem[curPc++];
+        temp.opTypes[0] = (b >> 6) & 0x03;
+        temp.opTypes[1] = (b >> 4) & 0x03;
+        temp.opTypes[2] = (b >> 2) & 0x03;
+        temp.opTypes[3] = b & 0x03;
+
+        for (temp.numOps = 0; temp.numOps < 4; ++temp.numOps) {
+            uint8_t opt = temp.opTypes[temp.numOps];
+            if (opt == OPTYPE_OMITTED) {
+                // no more valid operands
+                break;
+            }
+            switch (opt) {
+                case OPTYPE_LARGE_CONST: {
+                    temp.opVals[temp.numOps] = READ16(curPc);
+                    temp.opVars[temp.numOps] = temp.opVals[temp.numOps] & 0xFF; // see below
+                    curPc += 2;
+                    break;
+                }
+                case OPTYPE_SMALL_CONST: {
+                    uint8_t val = (uint16_t)m_state.mem[curPc++];
+                    temp.opVals[temp.numOps] = val;
+                    temp.opVars[temp.numOps] = val; // hack for opcodes like INC_CHK to get the variable index correctly
+                    // this should not be necessary for VAR instructions though
+                    break;
+                }
+                case OPTYPE_VAR: {
+                    uint8_t var = m_state.mem[curPc++];
+                    temp.opVals[temp.numOps] = var; // this value needs to be set separately (as getVar can have side effects)
+                    temp.opVars[temp.numOps] = var;
+                    break;
                 }
             }
         }
-        else if ((opcode & OPC_FORM_MASK) == OPC_FORM_SHORT) {
-            // bit5-4 = operand type
-            // if == 11 => 0OP, otherwise 1OP
-            uint8_t opt = (opcode >> 4) & 0x03;
-            if (opt == OPTYPE_OMITTED) {
-                // this means it's a 0OP instruction
-                // opcode in bit3-0
-                switch (opcode & 0b00001111) {
-                case OPC_RTRUE:
-                    printf(" RTRUE");
-                    executeRet(1);
-                    break;
-                case OPC_RFALSE:
-                    printf(" RFALSE");
-                    executeRet(0);
-                    break;
-                case OPC_PRINT: {
-                    printf(" PRINT\n");
-                    char out[1024];
-                    uint32_t bytesRead = 0;
-                    int curOut = parseZText(header, mem.data(), &mem[pc], out, sizeof(out), &bytesRead);
-                    printf("> '%s'\n", out);
-                    pc += bytesRead;
-                    break;
-                }
-                case OPC_NEWLINE: {
-                    printf(" NEW_LINE\n");
-                    printf(">\n");
-                    break;
-                }
-                default:
-                    printf("\n\n");
-                    dumpMem(oldPc, 32);
-                    printf("ERROR: short 0OP opcode %02X (%s) not implemented yet (op = %u)\n",
-                        opcode & 0b00001111, g_opcodes0OP[opcode & 0b00001111], opcode);
-                    return 1;
-                }
-            }
-            else {
-                // this means it's a 1OP instruction
-                uint16_t val = getOperand(opt);
-                // opcode in bit3-0
-                switch (opcode & 0b00001111) {
-                case OPC_JZ:
-                    printf(" JZ");
-                    readBranchInfoAndJump(val == 0);
-                    break;
-                case OPC_GET_SIBLING: {
-                    printf(" GET_SIBLING");
-                    // get_sibling object -> (result) ?(label)
-                    // Get next object in tree, branching if this exists, i.e.is not 0.
-                    uint8_t objId = (uint8_t)val;
-                    ZObject_v1* obj = getObject(objId);
-                    debugPrintObjName(obj);
-                    setVar(mem[pc++], obj->sibling);
-                    readBranchInfoAndJump(obj->sibling != 0);
-                    break;
-                }
-                case OPC_GET_CHILD: {
-                    printf(" GET_CHILD");
-                    // get_child object -> (result) ?(label)
-                    // Get first object contained in given object, branching if this exists,
-                    // i.e. is not nothing (i.e., is not 0).
-                    uint8_t objId = (uint8_t)val;
-                    ZObject_v1* obj = getObject(objId);
-                    debugPrintObjName(obj);
-                    setVar(mem[pc++], obj->child);
-                    readBranchInfoAndJump(obj->child != 0);
-                    break;
-                }
-                case OPC_GET_PARENT: {
-                    printf(" GET_PARENT");
-                    // get_parent object -> (result)
-                    uint8_t objId = (uint8_t)val;
-                    ZObject_v1* obj = getObject(objId);
-                    debugPrintObjName(obj);
-                    setVar(mem[pc++], obj->parent);
-                    break;
-                }
-                case OPC_PRINT_OBJ: {
-                    printf(" PRINT_OBJ\n");
-                    // print_obj object
-                    uint8_t objId = (uint8_t)val;
-                    ZObject_v1* obj = getObject(objId);
-                    printf("> '"); printZText(header, mem.data(), &mem[BE16(obj->props) + 1]); printf("'\n");
-                    break;
-                }
-                case OPC_RET: {
-                    printf(" RET");
-                    executeRet(val);
-                    break;
-                }
-                case OPC_JUMP: {
-                    printf(" JUMP");
-                    // branch of 16bits signed offset
-                    pc = (uint32_t)((int32_t)pc + (int16_t)val - 2);
-                    printf(" %04X", pc);
-                    break;
-                }
-                default:
-                    printf("\n\n");
-                    dumpMem(oldPc, 32);
-                    printf("ERROR: short 1OP opcode %02X (%s) not implemented yet (op = %u)\n",
-                        opcode & 0b00001111, g_opcodes1OP[opcode & 0b00001111], opcode);
-                    return 1;
-                }
-            }
+    }
+    else if ((opcode & OPC_FORM_MASK) == OPC_FORM_SHORT) {
+        // bit5-4 = operand type
+        // if == 11 => 0OP, otherwise 1OP
+        uint8_t opt = (opcode >> 4) & 0x03;
+        if (opt == OPTYPE_OMITTED) {
+            // this means it's a 0OP instruction
+            // opcode in bit3-0
+            temp.numOps = 0;
         }
         else {
-            // long form, operand count is always 2OP
-            // bit6 = type 1st operand, bit5 = type 2nd operand
-            // 0 = small constant, 1 = variable
-            // opcode in bit4-0
-
-            // read 1st operand
-            uint8_t isVar1 = (opcode & BIT6) != 0;
-
-            // TODO HAX: set isVar to true if opcode requires
-            if ((opcode & 0b00011111) == OPC_INC_CHK)
-                isVar1 = true;
-
-            uint8_t opByte1 = mem[pc++];
-            uint16_t val1 = isVar1 ? getVar(opByte1) : (uint16_t)opByte1;
-            if (isVar1) printVarName(opByte1); else printf(" #%02X", opByte1);
-
-            // read 2nd operand
-            uint8_t isVar2 = (opcode & BIT5) != 0;
-            uint8_t opByte2 = mem[pc++];
-            uint16_t val2 = isVar2 ? getVar(opByte2) : (uint16_t)opByte2;
-            if (isVar2) printVarName(opByte2); else printf(" #%02X", opByte2);
-
-            //if (oldPc == 0x6fa4) DebugBreak();
-
-            // handle 2OP
-            if (!execute2OP(opcode & 0b00011111, val1, val2, isVar1, opByte1, isVar2, opByte2)) {
-                printf("\n\n");
-                dumpMem(oldPc, 32);
-                printf("ERROR: long 2OP opcode %02X (%s) not implemented yet (op = %u)\n",
-                    opcode & 0b00011111, g_opcodes2OP[opcode & 0b00011111], opcode);
-                return 1;
+            // this means it's a 1OP instruction
+            // read operand
+            temp.numOps = 1;
+            temp.opTypes[0] = opt;
+            switch (opt) {
+                case OPTYPE_LARGE_CONST: {
+                    temp.opVals[0] = READ16(curPc);
+                    temp.opVars[0] = temp.opVals[0] & 0xFF; // hack for opcodes like INC_CHK to get the variable index correctly
+                    curPc += 2;
+                    break;
+                }
+                case OPTYPE_SMALL_CONST: {
+                    uint8_t val = m_state.mem[curPc++];
+                    temp.opVals[0] = val;
+                    temp.opVars[0] = val; // hack for opcodes like INC_CHK to get the variable index correctly
+                    break;
+                }
+                case OPTYPE_VAR: {
+                    uint8_t var = m_state.mem[curPc++];
+                    temp.opVals[0] = var; // this value needs to be set separately (as getVar can have side effects)
+                    temp.opVars[0] = var;
+                    break;
+                }
+                default:
+                    assert(false);
+                    return false;
             }
         }
-        
-        printf("\n");
+    }
+    else {
+        // long form, operand count is always 2OP
+        // bit6 = type 1st operand, bit5 = type 2nd operand
+        // 0 = small constant, 1 = variable
+        // opcode in bit4-0
+        temp.numOps = 2;
+
+        // read 1st operand
+        uint8_t isVar1 = (opcode & BIT6) != 0;
+        temp.opVars[0] = m_state.mem[curPc++];
+        temp.opVals[0] = (uint16_t)temp.opVars[0]; // this value needs to be set separately (as getVar can have side effects)
+        temp.opTypes[0] = isVar1 ? OPTYPE_VAR : OPTYPE_SMALL_CONST;
+
+        // read 2nd operand
+        uint8_t isVar2 = (opcode & BIT5) != 0;
+        temp.opVars[1] = m_state.mem[curPc++];
+        temp.opVals[1] = (uint16_t)temp.opVars[1]; // this value needs to be set separately (as getVar can have side effects)
+        temp.opTypes[1] = isVar2 ? OPTYPE_VAR : OPTYPE_SMALL_CONST;
+    }
+    return true;
+}
+
+void Zed::disasmCurInstruction() {
+    // get current pc
+    ZMachineTemp temp;
+    uint32_t initPc = m_state.pc;
+    temp.curPc = initPc;
+    debugPrintf("[%04X] ", temp.curPc);
+
+    // if (temp.curPc == 0x54C1) DebugBreak();
+
+    // parse opcode and operands
+    parseOpcodeAndOperands(temp);
+    const ZOpcodeInfo* opInfo = nullptr;
+    // parse opcode
+    if (temp.opcode == OPC_EXTENDED) { // only v5+
+        // operand count is VAR (see VAR form below)
+        // opcode in second byte
+        assert(false);
+        return;
+    }
+    else if ((temp.opcode & OPC_FORM_MASK) == OPC_FORM_VARIABLE) {
+        // if bit5 == 0 => 2OP, else VAR
+        // opcode in bit4-0
+        // check if VAR or 2OP
+        if (temp.opcode & BIT5) {
+            // VAR opcode
+            opInfo = &g_opcodesVAR[temp.opcode & 0b00011111];
+        }
+        else {
+            // 2OP opcode
+            opInfo = &g_opcodes2OP[temp.opcode & 0b00011111];
+        }
+    }
+    else if ((temp.opcode & OPC_FORM_MASK) == OPC_FORM_SHORT) {
+        // bit5-4 = operand type
+        // if == 11 => 0OP, otherwise 1OP
+        uint8_t opt = (temp.opcode >> 4) & 0x03;
+        if (opt == OPTYPE_OMITTED) {
+            // this means it's a 0OP instruction
+            // opcode in bit3-0
+            opInfo = &g_opcodes0OP[temp.opcode & 0b00001111];
+        }
+        else {
+            // this means it's a 1OP instruction
+            // opcode in bit3-0
+            opInfo = &g_opcodes1OP[temp.opcode & 0b00001111];
+        }
+    }
+    else {
+        // long form, operand count is always 2OP
+        // opcode in bit4-0
+        opInfo = &g_opcodes2OP[temp.opcode & 0b00011111];
+    }
+    // print opcode
+    debugPrint(opInfo->name);
+    // print operands
+    for (uint8_t i = 0; i < temp.numOps; ++i) {
+        switch (temp.opTypes[i]) {
+            case OPTYPE_SMALL_CONST:
+                debugPrintf(" #%02X", temp.opVals[i]);
+                break;
+            case OPTYPE_LARGE_CONST:
+                debugPrintf(" #%04X", temp.opVals[i]);
+                break;
+            case OPTYPE_VAR:
+                debugPrintVarName(temp.opVars[i]);
+                break;
+        }
+        // print object names eventually
+        if ((opInfo->flags & OPF_OBJ1) && (i == 0) && (temp.opTypes[i] != OPTYPE_VAR))
+            debugPrintObjName(getObject(temp.opVals[i]));
+        else if ((opInfo->flags & OPF_OBJ2) && (i == 1) && (temp.opTypes[i] != OPTYPE_VAR))
+            debugPrintObjName(getObject(temp.opVals[i]));
+    }
+    // parse branch info
+    if (opInfo->flags & OPF_BRANCH)
+        disasmBranch(temp.curPc);
+    // parse storing of result
+    if (opInfo->flags & OPF_STORE) {
+        debugPrint(" ->");
+        debugPrintVarName(m_state.mem[temp.curPc++]);
+    }
+    // finished
+    debugPrint("\n");
+}
+
+bool Zed::step() {
+    bool ret;
+
+    // set current pc
+    m_temp.curPc = m_state.pc;
+
+    // parse opcode and operands
+    if (!parseOpcodeAndOperands(m_temp))
+        return false;
+
+    // read operands which are variables
+    for (uint8_t i = 0; i < m_temp.numOps; ++i) {
+        if (m_temp.opTypes[i] == OPTYPE_VAR)
+            m_temp.opVals[i] = getVar(m_temp.opVars[i]);
     }
 
-    return 0;
+    // execute opcode
+    if (m_temp.opcode == OPC_EXTENDED) { // only v5+
+        // operand count is VAR (see VAR form below)
+        // opcode in second byte
+        assert(false);
+        return false;
+    }
+    else if ((m_temp.opcode & OPC_FORM_MASK) == OPC_FORM_VARIABLE) {
+        // if bit5 == 0 => 2OP, else VAR
+        // opcode in bit4-0
+        // check if VAR or 2OP
+        if (m_temp.opcode & BIT5) {
+            // VAR opcode
+            ret = execVarInstruction(m_temp.opcode);
+        }
+        else {
+            // handle 2OP
+            ret = exec2OPInstruction(m_temp.opcode);
+        }
+    }
+    else if ((m_temp.opcode & OPC_FORM_MASK) == OPC_FORM_SHORT) {
+        // bit5-4 = operand type
+        // if == 11 => 0OP, otherwise 1OP
+        uint8_t opt = (m_temp.opcode >> 4) & 0x03;
+        if (opt == OPTYPE_OMITTED) {
+            // this means it's a 0OP instruction
+            // opcode in bit3-0
+            ret = exec0OPInstruction(m_temp.opcode);
+        }
+        else {
+            // this means it's a 1OP instruction
+            // opcode in bit3-0
+            ret = exec1OPInstruction(m_temp.opcode);
+        }
+    }
+    else {
+        // long form, operand count is always 2OP
+        // opcode in bit4-0
+        ret = exec2OPInstruction(m_temp.opcode);
+    }
+
+    // update state pc
+    if (ret)
+        m_state.pc = m_temp.curPc;
+    return ret;
+}
+
+bool Zed::run() {
+    bool ret = true;
+    while (ret) {
+        ret = step();
+    }
+    return ret;
 }

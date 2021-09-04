@@ -3,6 +3,9 @@
 #define _H_ZED_
 
 #include <cstdint>
+#include <vector>
+#include <functional>
+
 
 #pragma pack(push, 1)
 
@@ -51,5 +54,101 @@ typedef struct ZObject_v1 {
 } ZObject_v1;
 
 #pragma pack(pop)
+
+typedef struct ZMachineState {
+    std::vector<uint8_t> mem;
+    const ZHeader* header;
+    uint32_t pc;
+    std::vector<uint16_t> callsPtr;
+    uint32_t curCall;
+    std::vector<uint16_t> stackMem;
+    uint32_t sp;
+
+    //! Reset Z-Machine state
+    void reset();
+} ZMachineState;
+
+typedef struct ZMachineTemp {
+    uint32_t curPc;
+    uint8_t opcode;
+    uint8_t numOps;
+    uint16_t opVals[8];
+    uint8_t opTypes[8];
+    uint8_t opVars[8];
+} ZMachineTemp;
+
+class Zed {
+public:
+    ZMachineState m_state;
+    ZMachineTemp m_temp;
+
+    std::function<void(const char*)> debugPrintCallback = nullptr;
+    std::function<void(const char*)> errorPrintCallback = nullptr;
+    std::function<void(const char*)> gamePrintCallback = nullptr;
+
+    void copyStory(const uint8_t* mem, size_t memSize);
+
+    void reset();
+
+    bool run();
+
+    bool step();
+
+    void disasmCurInstruction();
+
+    int parseZText(const uint8_t* text, char* out, uint32_t outSize, uint32_t* outTextBytesRead, bool enableAbbrev = true);
+
+    int parseZCharacters(const uint8_t* buf, uint32_t numBuf, char* out, uint32_t outSize, bool enableAbbrev = true);
+
+protected:
+    void debugZText(const uint8_t* text);
+    void debugPrintf(const char* fmt, ...);
+    void debugPrint(const char* text);
+
+    void debugPrintVarName(uint8_t var);
+    void debugPrintObjName(const ZObject_v1* obj);
+
+    void errorPrintf(const char* fmt, ...);
+    void errorPrint(const char* text);
+
+    void gamePrintf(const char* fmt, ...);
+    void gamePrint(const char* text);
+
+    //! Read variable indexed by idx
+    uint16_t getVar(uint8_t idx);
+
+    //! Write in variable indexed by idx
+    void setVar(uint8_t idx, uint16_t value);
+
+    // v1-3
+    ZObject_v1* getObject(uint16_t objIndex);
+
+    // v1-3
+    uint16_t getPropertyDefault(uint16_t propIndex);
+
+
+    //! Just read branch info and return it
+    void readBranchInfo(uint32_t& curPc, bool& jumpCond, uint32_t& dest) const;
+
+    //! Parse opcode and subsequent operands, storing everything in temp
+    bool parseOpcodeAndOperands(ZMachineTemp& temp) const;
+
+    //! Execute a CALL
+    void execCall();
+
+    //! Execute a RET, with the given return value
+    void execRet(uint16_t val);
+
+    //! Read branch info and jump if condition is met
+    void execBranch(bool condition);
+
+    bool exec0OPInstruction(uint8_t opcode);
+    bool exec1OPInstruction(uint8_t opcode);
+    bool exec2OPInstruction(uint8_t opcode);
+    bool execVarInstruction(uint8_t opcode);
+
+    //! Disasm the branch info
+    void disasmBranch(uint32_t& curPc);
+};
 
 #endif // _H_ZED_

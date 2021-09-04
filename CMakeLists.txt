@@ -10,3 +10,9 @@ string( REPLACE "/DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE
 string( REPLACE "/DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
 
 add_subdirectory("Zed")
+
+add_subdirectory("ZedCli")
+
+add_subdirectory("ZedUI")
+
+add_subdirectory("HelloGUI")

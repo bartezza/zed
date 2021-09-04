@@ -3,19 +3,18 @@ add_definitions("-D_CRT_SECURE_NO_WARNINGS -DNOMINMAX")
 
 add_definitions("/wd26812")
 
-set(ZED_LIB Zed)
+set(ZED_EXE ZedCli)
 
 set(SRCS
-    "Zed.cpp"
-    "Zed.h"
+    "ZedCli.cpp"
 )
 
 set(LIBS
 
 )
 
-add_library(${ZED_LIB}
+add_executable(${ZED_EXE}
     "${SRCS}"
 )
 
-# target_link_libraries(${ZED_EXE} ${LIBS})
+target_link_libraries(${ZED_EXE} ${LIBS} Zed)
