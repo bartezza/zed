@@ -160,7 +160,7 @@ MainWindow::~MainWindow()
 void MainWindow::on_btnRefresh_clicked()
 {
     // ui->lstRoms->clear();
-    ui->lstRoms->addItem("blabla");
+    ui->lstStories->addItem("blabla");
 }
 
 void MainWindow::on_btnLoad_clicked()
@@ -290,12 +290,12 @@ void MainWindow::reqDisplayCpuState() {
 
 void MainWindow::on_btnRun_clicked()
 {
-    ui->btnPause->setText("Pause");
+    
 }
 
-void MainWindow::on_btnPause_clicked()
+void MainWindow::on_btnReset_clicked()
 {
-    ui->btnPause->setText("Resume");
+    
 }
 
 void MainWindow::on_btnDisasm_clicked()

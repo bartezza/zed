@@ -27,7 +27,7 @@
      <string>Load</string>
     </property>
    </widget>
-   <widget class="QListWidget" name="lstRoms">
+   <widget class="QListWidget" name="lstStories">
     <property name="geometry">
      <rect>
       <x>530</x>
@@ -54,9 +54,9 @@
     <property name="geometry">
      <rect>
       <x>10</x>
-      <y>410</y>
+      <y>10</y>
       <width>511</width>
-      <height>271</height>
+      <height>631</height>
      </rect>
     </property>
     <property name="font">
@@ -86,187 +86,6 @@
     </property>
     <property name="text">
      <string>Step</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="label">
-    <property name="geometry">
-     <rect>
-      <x>530</x>
-      <y>220</y>
-      <width>16</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>A</string>
-    </property>
-   </widget>
-   <widget class="QPlainTextEdit" name="txtA">
-    <property name="geometry">
-     <rect>
-      <x>550</x>
-      <y>210</y>
-      <width>31</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <family>Courier</family>
-     </font>
-    </property>
-    <property name="readOnly">
-     <bool>true</bool>
-    </property>
-    <property name="plainText">
-     <string>AA</string>
-    </property>
-   </widget>
-   <widget class="QPlainTextEdit" name="txtF">
-    <property name="geometry">
-     <rect>
-      <x>610</x>
-      <y>210</y>
-      <width>31</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <family>Courier</family>
-     </font>
-    </property>
-    <property name="readOnly">
-     <bool>true</bool>
-    </property>
-    <property name="plainText">
-     <string>AA</string>
-    </property>
-   </widget>
-   <widget class="QPlainTextEdit" name="txtB">
-    <property name="geometry">
-     <rect>
-      <x>550</x>
-      <y>250</y>
-      <width>31</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <family>Courier</family>
-     </font>
-    </property>
-    <property name="readOnly">
-     <bool>true</bool>
-    </property>
-    <property name="plainText">
-     <string>AA</string>
-    </property>
-   </widget>
-   <widget class="QPlainTextEdit" name="txtC">
-    <property name="geometry">
-     <rect>
-      <x>610</x>
-      <y>250</y>
-      <width>31</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <family>Courier</family>
-     </font>
-    </property>
-    <property name="readOnly">
-     <bool>true</bool>
-    </property>
-    <property name="plainText">
-     <string>AA</string>
-    </property>
-   </widget>
-   <widget class="QPlainTextEdit" name="txtD">
-    <property name="geometry">
-     <rect>
-      <x>550</x>
-      <y>290</y>
-      <width>31</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <family>Courier</family>
-     </font>
-    </property>
-    <property name="readOnly">
-     <bool>true</bool>
-    </property>
-    <property name="plainText">
-     <string>AA</string>
-    </property>
-   </widget>
-   <widget class="QPlainTextEdit" name="txtE">
-    <property name="geometry">
-     <rect>
-      <x>610</x>
-      <y>290</y>
-      <width>31</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <family>Courier</family>
-     </font>
-    </property>
-    <property name="readOnly">
-     <bool>true</bool>
-    </property>
-    <property name="plainText">
-     <string>AA</string>
-    </property>
-   </widget>
-   <widget class="QPlainTextEdit" name="txtH">
-    <property name="geometry">
-     <rect>
-      <x>550</x>
-      <y>330</y>
-      <width>31</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <family>Courier</family>
-     </font>
-    </property>
-    <property name="readOnly">
-     <bool>true</bool>
-    </property>
-    <property name="plainText">
-     <string>AA</string>
-    </property>
-   </widget>
-   <widget class="QPlainTextEdit" name="txtL">
-    <property name="geometry">
-     <rect>
-      <x>610</x>
-      <y>330</y>
-      <width>31</width>
-      <height>31</height>
-     </rect>
-    </property>
-    <property name="font">
-     <font>
-      <family>Courier</family>
-     </font>
-    </property>
-    <property name="readOnly">
-     <bool>true</bool>
-    </property>
-    <property name="plainText">
-     <string>AA</string>
     </property>
    </widget>
    <widget class="QPlainTextEdit" name="txtSP">
@@ -311,19 +130,6 @@
      <string>AA</string>
     </property>
    </widget>
-   <widget class="QLabel" name="label_2">
-    <property name="geometry">
-     <rect>
-      <x>590</x>
-      <y>220</y>
-      <width>16</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>F</string>
-    </property>
-   </widget>
    <widget class="QLabel" name="label_3">
     <property name="geometry">
      <rect>
@@ -348,84 +154,6 @@
     </property>
     <property name="text">
      <string>PC</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="label_5">
-    <property name="geometry">
-     <rect>
-      <x>590</x>
-      <y>260</y>
-      <width>16</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>C</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="label_6">
-    <property name="geometry">
-     <rect>
-      <x>590</x>
-      <y>300</y>
-      <width>16</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>E</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="label_7">
-    <property name="geometry">
-     <rect>
-      <x>590</x>
-      <y>340</y>
-      <width>16</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>L</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="label_8">
-    <property name="geometry">
-     <rect>
-      <x>530</x>
-      <y>260</y>
-      <width>16</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>B</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="label_9">
-    <property name="geometry">
-     <rect>
-      <x>530</x>
-      <y>300</y>
-      <width>16</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>D</string>
-    </property>
-   </widget>
-   <widget class="QLabel" name="label_10">
-    <property name="geometry">
-     <rect>
-      <x>530</x>
-      <y>340</y>
-      <width>16</width>
-      <height>16</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>H</string>
     </property>
    </widget>
    <widget class="QPlainTextEdit" name="txtMemPC">
@@ -490,68 +218,6 @@
      <string>Mem. SP</string>
     </property>
    </widget>
-   <widget class="QCheckBox" name="chkZ">
-    <property name="geometry">
-     <rect>
-      <x>540</x>
-      <y>380</y>
-      <width>31</width>
-      <height>20</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Z</string>
-    </property>
-   </widget>
-   <widget class="QCheckBox" name="chkC">
-    <property name="geometry">
-     <rect>
-      <x>660</x>
-      <y>380</y>
-      <width>31</width>
-      <height>20</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>C</string>
-    </property>
-   </widget>
-   <widget class="QCheckBox" name="chkH">
-    <property name="geometry">
-     <rect>
-      <x>620</x>
-      <y>380</y>
-      <width>31</width>
-      <height>20</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>H</string>
-    </property>
-   </widget>
-   <widget class="QCheckBox" name="chkN">
-    <property name="geometry">
-     <rect>
-      <x>580</x>
-      <y>380</y>
-      <width>31</width>
-      <height>20</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>N</string>
-    </property>
-   </widget>
-   <widget class="QPlainTextEdit" name="txtCycles">
-    <property name="geometry">
-     <rect>
-      <x>870</x>
-      <y>160</y>
-      <width>81</width>
-      <height>31</height>
-     </rect>
-    </property>
-   </widget>
    <widget class="QListWidget" name="lstDisasm">
     <property name="geometry">
      <rect>
@@ -593,7 +259,7 @@
      <string>Run</string>
     </property>
    </widget>
-   <widget class="QPushButton" name="btnPause">
+   <widget class="QPushButton" name="btnReset">
     <property name="geometry">
      <rect>
       <x>750</x>
@@ -603,88 +269,30 @@
      </rect>
     </property>
     <property name="text">
-     <string>Pause</string>
+     <string>Reset</string>
     </property>
    </widget>
-   <widget class="QFrame" name="frame">
+   <widget class="QPlainTextEdit" name="txtUserCmd">
     <property name="geometry">
      <rect>
-      <x>220</x>
-      <y>210</y>
-      <width>261</width>
-      <height>141</height>
+      <x>10</x>
+      <y>650</y>
+      <width>451</width>
+      <height>31</height>
      </rect>
     </property>
-    <property name="frameShape">
-     <enum>QFrame::StyledPanel</enum>
-    </property>
-    <property name="frameShadow">
-     <enum>QFrame::Raised</enum>
-    </property>
-    <widget class="QRadioButton" name="radioBPNone">
-     <property name="geometry">
-      <rect>
-       <x>20</x>
-       <y>20</y>
-       <width>95</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>None</string>
-     </property>
-     <property name="checked">
-      <bool>true</bool>
-     </property>
-    </widget>
-    <widget class="QRadioButton" name="radioBPPC">
-     <property name="geometry">
-      <rect>
-       <x>20</x>
-       <y>50</y>
-       <width>95</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Break on PC</string>
-     </property>
-    </widget>
-    <widget class="QRadioButton" name="radioBPA">
-     <property name="geometry">
-      <rect>
-       <x>20</x>
-       <y>80</y>
-       <width>95</width>
-       <height>20</height>
-      </rect>
-     </property>
-     <property name="text">
-      <string>Break on A</string>
-     </property>
-    </widget>
-    <widget class="QPlainTextEdit" name="txtBPArg">
-     <property name="geometry">
-      <rect>
-       <x>140</x>
-       <y>50</y>
-       <width>111</width>
-       <height>31</height>
-      </rect>
-     </property>
-    </widget>
    </widget>
-   <widget class="QPushButton" name="btnDisasm">
+   <widget class="QPushButton" name="cmdOk">
     <property name="geometry">
      <rect>
-      <x>830</x>
-      <y>90</y>
-      <width>111</width>
-      <height>41</height>
+      <x>470</x>
+      <y>650</y>
+      <width>51</width>
+      <height>31</height>
      </rect>
     </property>
     <property name="text">
-     <string>Update disasm</string>
+     <string>OK</string>
     </property>
    </widget>
   </widget>
@@ -694,7 +302,7 @@
      <x>0</x>
      <y>0</y>
      <width>1053</width>
-     <height>26</height>
+     <height>21</height>
     </rect>
    </property>
   </widget>

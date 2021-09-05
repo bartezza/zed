@@ -72,8 +72,6 @@ public:
 
     void reqDisplayCpuState();
 
-    void updateBreakpoints();
-
 private slots:
     void on_btnRefresh_clicked();
 
@@ -81,7 +79,7 @@ private slots:
     void on_btnStep_clicked();
 
     void on_btnRun_clicked();
-    void on_btnPause_clicked();
+    void on_btnReset_clicked();
     
     void on_btnDisasm_clicked();
 
