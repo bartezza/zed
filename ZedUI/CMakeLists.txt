@@ -1,7 +1,9 @@
 
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.16)
 
-set(CMAKE_CXX_STANDARD 11)
+project(ZedUI VERSION 1.0.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 11)  # 17
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_AUTOMOC ON)
@@ -30,7 +32,7 @@ add_executable(ZedUI
 target_link_libraries(ZedUI Qt6::Widgets Zed)
 
 # TEMP
-set(QT_BASE "D:\\Frameworks\\Qt3\\6.1.3\\msvc2019_64\\bin")
+# set(QT_BASE "D:\\Frameworks\\Qt3\\6.1.3\\msvc2019_64\\bin")
 
-set(MY_PATH "PATH=${QT_BASE}\\bin;${QT_BASE}\\plugins\\platforms;%PATH%")
-set_target_properties(ZedUI PROPERTIES VS_DEBUGGER_ENVIRONMENT "${MY_PATH}")
+# set(MY_PATH "PATH=${QT_BASE}\\bin;${QT_BASE}\\plugins\\platforms;%PATH%")
+# set_target_properties(ZedUI PROPERTIES VS_DEBUGGER_ENVIRONMENT "${MY_PATH}")

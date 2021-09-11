@@ -8,8 +8,8 @@
 #include <QtWidgets/QMainWindow>
 #include <QtCore/QEvent>
 #endif
-//#include "ConcurrentQueue.h"
-#include "SimpleConcurrentQueue.h"
+#include <QThread>
+#include "../Zed/Zed.h"
 
 // prototypes
 namespace Ui {
@@ -19,58 +19,36 @@ class MainWindow;
 
 //============================================================//
 
-class GuiUpdater: public QObject {
+class ZedThread : public QThread {
     Q_OBJECT
-protected:
-    MainWindow *m_parent;
-
-    QString m_tempLog;
-    QString m_tempSerial;
-
-    //moodycamel::ConcurrentQueue<QChar> m_logQueue;
-    //moodycamel::ConcurrentQueue<QChar> m_serialQueue;
-    SimpleConcurrentQueue<QChar> m_logQueue;
-    SimpleConcurrentQueue<QChar> m_serialQueue;
-
 public:
-    GuiUpdater(MainWindow *parent): QObject(), m_parent(parent) {}
+    ZedThread(MainWindow* mainWindow);
+    ~ZedThread();
 
-    void addLogText(const QString &text);
-    void addSerialText(const QString &text);
+    Zed m_zed;
 
-public slots:
-    void start();
+    void zedDebugPrint(const char* str);
+    void zedErrorPrint(const char* str);
+    void zedGamePrint(const char* str);
 
-private slots:
-    void update();
+protected:
+    void run() override;
 };
 
 //============================================================//
 
-class MainWindow : public QMainWindow
+class MainWindow: public QMainWindow
 {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget *parent = 0);
     ~MainWindow();
 
-    void doRefreshRoms();
-
     inline const Ui::MainWindow *getUi() const { return ui; }
     inline Ui::MainWindow *getUi() { return ui; }
 
     void customEvent(QEvent *e);
     void closeEvent(QCloseEvent *e);
-
-    //void displayCpuState(BartBoy::GBCpuState *state);
-
-    void addLogText(const QString &text) { m_guiUpdater.addLogText(text); }
-    void addSerialText(const QString &text) { m_guiUpdater.addSerialText(text); }
-
-    void addLogTextDirect(const QString &text);
-    void addSerialTextDirect(const QString &text);
-
-    void reqDisplayCpuState();
 
 private slots:
     void on_btnRefresh_clicked();
@@ -83,14 +61,8 @@ private slots:
     
     void on_btnDisasm_clicked();
 
-    //void on_MainWindow_destroyed();
-
-    //void on_MainWindow_destroyed(QObject *arg1);
-
 private:
     Ui::MainWindow *ui;
-
-    GuiUpdater m_guiUpdater;
 };
 
 //============================================================//
