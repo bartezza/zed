@@ -15,4 +15,4 @@ add_subdirectory("ZedCli")
 
 add_subdirectory("ZedUI")
 
-add_subdirectory("HelloGUI")
+# add_subdirectory("HelloGUI")

@@ -78,7 +78,8 @@ void GuiUpdater::update() {
 
 #elif QUEUE_TYPE == 2
     size_t logSize = m_logQueue.size();
-    m_tempLog.reserve(logSize + 1);
+    if (m_tempLog.size() < (logSize + 1))
+        m_tempLog.resize(logSize + 1);
     //m_tempLog.clear();
 
 #if 0
@@ -117,7 +118,8 @@ void GuiUpdater::update() {
 
 #if QUEUE_TYPE == 2
     logSize = m_serialQueue.size();
-    m_tempSerial.reserve(logSize + 1);
+    if (m_tempSerial.size() < (logSize + 1))
+        m_tempSerial.resize(logSize + 1);
     //m_tempLog.clear();
 
     for (i = 0; i < logSize; ++i) {
@@ -197,7 +199,7 @@ void MainWindow::on_btnLoad_clicked()
 }
 
 void MainWindow::on_btnStep_clicked() {
-
+    addSerialText("test serial text");
 }
 
 /*void MainWindow::addLogText(const QString &text) {
