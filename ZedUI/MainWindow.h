@@ -27,6 +27,9 @@ public:
 
     Zed m_zed;
 
+public slots:
+    void loadStory(const QByteArray &bytes);
+
     void zedDebugPrint(const char* str);
     void zedErrorPrint(const char* str);
     void zedGamePrint(const char* str);
@@ -49,6 +52,8 @@ public:
 
     void customEvent(QEvent *e);
     void closeEvent(QCloseEvent *e);
+
+    ZedThread m_zedThread;
 
 private slots:
     void on_btnRefresh_clicked();

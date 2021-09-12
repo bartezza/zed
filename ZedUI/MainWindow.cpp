@@ -4,6 +4,8 @@
 #include <QMessageBox>
 #include <QTimer>
 #include <QString>
+#include <QFile>
+#include <QFileDialog>
 
 //QTimer::singleShot(0, this, SLOT(update())); 
 // QTimer::singleShot(10, this, SLOT(update()));
@@ -45,14 +47,18 @@ void ZedThread::zedGamePrint(const char* str) {
     qDebug(str);
 }
 
+void ZedThread::loadStory(const QByteArray& data) {
+    m_zed.copyStory(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+}
+
 //============================================================//
 
-MainWindow::MainWindow(QWidget *parent) :
+MainWindow::MainWindow(QWidget* parent) :
     QMainWindow(parent),
-    ui(new Ui::MainWindow)
+    ui(new Ui::MainWindow),
+    m_zedThread(this)
 {
     ui->setupUi(this);
-
 }
 
 MainWindow::~MainWindow()
@@ -69,38 +75,28 @@ void MainWindow::on_btnLoad_clicked()
 {
     // load story
     // const char* filename = "..\\..\\..\\..\\Data\\zork1-r119-s880429.z3";
-    const char* filename = "..\\..\\..\\..\\Data\\zork1-r88-s840726.z3";
-    // open story file
-    FILE* fp = fopen(filename, "rb");
-    if (fp == nullptr) {
-        QMessageBox msgBox;
-        msgBox.setText(QString::asprintf("Could not load '%s'", filename));
-        msgBox.setIcon(QMessageBox::Icon::Critical);
-        msgBox.exec();
-        return;
-    }
-    // get total size
-    fseek(fp, 0, SEEK_END);
-    long size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    // alloc memory
-    std::vector<uint8_t> mem(size);
-    // read the file
-    if (fread(&mem[0], 1, size, fp) != size) {
-        QMessageBox msgBox;
-        msgBox.setText(QString::asprintf("Could not read % i bytes of story file", size));
-        msgBox.setIcon(QMessageBox::Icon::Critical);
-        msgBox.exec();
-        return;
-    }
-    fclose(fp);
+    // const char* filename = "..\\..\\..\\..\\Data\\zork1-r88-s840726.z3u";
 
-    // copy story
-    // zed.copyStory(mem.data(), mem.size());
-    // TODO
+    QString dir = "../../../../Data";
+
+    QString filename = QFileDialog::getOpenFileName(this, "Open story file", dir, "Z-Machine v3 stories (*.z3);;All files (*)");
+    if (filename.isEmpty())
+        return;
+
+    QFile file(filename);
+    if (!file.open(QIODevice::ReadOnly)) {
+        QMessageBox msgBox;
+        msgBox.setText(QString("Could not open '%1'").arg(filename));
+        msgBox.setIcon(QMessageBox::Icon::Critical);
+        msgBox.exec();
+        return;
+    }
+    QByteArray blob = file.readAll();
+
+    m_zedThread.loadStory(blob);
 
     QMessageBox msgBox;
-    msgBox.setText(QString::asprintf("Loaded story '%s'", filename));
+    msgBox.setText(QString("Loaded story '%0', %1 bytes").arg(filename).arg(blob.size()));
     msgBox.setIcon(QMessageBox::Icon::Information);
     msgBox.exec();
 }
