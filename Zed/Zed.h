@@ -57,12 +57,12 @@ typedef struct ZObject_v1 {
 
 typedef struct ZMachineState {
     std::vector<uint8_t> mem;
-    const ZHeader* header;
-    uint32_t pc;
+    const ZHeader* header = nullptr;
+    uint32_t pc = 0;
     std::vector<uint16_t> callsPtr;
-    uint32_t curCall;
+    uint32_t curCall = 0;
     std::vector<uint16_t> stackMem;
-    uint32_t sp;
+    uint32_t sp = 0;
 
     //! Reset Z-Machine state
     void reset();

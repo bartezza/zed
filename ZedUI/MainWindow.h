@@ -9,6 +9,8 @@
 #include <QtCore/QEvent>
 #endif
 #include <QThread>
+#include <QMutex>
+#include <QWaitCondition>
 #include "../Zed/Zed.h"
 
 // prototypes
@@ -27,6 +29,10 @@ public:
 
     Zed m_zed;
 
+    void stepStory();
+    void continueStory();
+    void resetStory();
+
 public slots:
     void loadStory(const QByteArray &bytes);
 
@@ -35,6 +41,12 @@ public slots:
     void zedGamePrint(const char* str);
 
 protected:
+    QMutex m_mutex;
+    QWaitCondition m_condition;
+    bool m_singleStep = false;
+    bool m_reset = false;
+    bool m_abort = false;
+
     void run() override;
 };
 
@@ -56,6 +68,8 @@ public:
     ZedThread m_zedThread;
 
 private slots:
+    void timerUpdateState();
+
     void on_btnRefresh_clicked();
 
     void on_btnLoad_clicked();
