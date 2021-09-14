@@ -7,6 +7,17 @@
 #include <functional>
 
 
+typedef struct TextBuffer {
+    char buf[1024] = "";
+    size_t ptr = 0;
+
+    void reset();
+    void printf(const char* str, ...);
+    void copy(const char* str);
+    void copy(char ch);
+} TextBuffer;
+
+
 #pragma pack(push, 1)
 
 // http://inform-fiction.org/zmachine/standards/z1point1/sect11.html
@@ -94,7 +105,7 @@ public:
 
     bool step();
 
-    void disasmCurInstruction();
+    void disasmCurInstruction(TextBuffer& tb);
 
     int parseZText(const uint8_t* text, char* out, uint32_t outSize, uint32_t* outTextBytesRead, bool enableAbbrev = true);
 
@@ -105,8 +116,8 @@ protected:
     void debugPrintf(const char* fmt, ...);
     void debugPrint(const char* text);
 
-    void debugPrintVarName(uint8_t var);
-    void debugPrintObjName(const ZObject_v1* obj);
+    void debugPrintVarName(TextBuffer& tb, uint8_t var);
+    void debugPrintObjName(TextBuffer& tb, const ZObject_v1* obj);
 
     void errorPrintf(const char* fmt, ...);
     void errorPrint(const char* text);
@@ -148,7 +159,7 @@ protected:
     bool execVarInstruction(uint8_t opcode);
 
     //! Disasm the branch info
-    void disasmBranch(uint32_t& curPc);
+    void disasmBranch(TextBuffer& tb, uint32_t& curPc);
 };
 
 #endif // _H_ZED_

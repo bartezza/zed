@@ -6,6 +6,7 @@
 #include <QString>
 #include <QFile>
 #include <QFileDialog>
+#include <QScrollBar>
 
 //QTimer::singleShot(0, this, SLOT(update())); 
 // QTimer::singleShot(10, this, SLOT(update()));
@@ -64,11 +65,19 @@ void ZedThread::zedGamePrint(const char* str) {
     qDebug(str);
 }*/
 
-void ZedThread::loadStory(const QByteArray& data) {
-    
-    // TODO: handle multithreading
-
-    m_zed.copyStory(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+bool ZedThread::loadStory(const QByteArray& data) {
+    // try to lock the run mutex
+    if (m_runMutex.tryLock()) {
+        // if ok, setup the story
+        m_zed.copyStory(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+        // unlock it
+        m_runMutex.unlock();
+        return true;
+    }
+    else {
+        emit zedErrorPrint("Cannot load story while running");
+        return false;
+    }
 }
 
 void ZedThread::resetStory() {
@@ -111,6 +120,7 @@ void ZedThread::continueStory() {
 }
 
 void ZedThread::run() {
+    TextBuffer tb;
     forever{
         // check
         if (m_abort)
@@ -127,15 +137,25 @@ void ZedThread::run() {
         m_mutex.unlock();
 
         // execute action
+        m_runMutex.lock();
         if (reset) {
             m_zed.reset();
         }
         else if (singleStep) {
+            m_zed.disasmCurInstruction(tb);
+            emit zedAddDisasm(QString(tb.buf));
             m_zed.step();
         }
         else {
-            m_zed.run();
+            // m_zed.run();
+            bool ret = true;
+            while (ret) {
+                m_zed.disasmCurInstruction(tb);
+                emit zedAddDisasm(QString(tb.buf));
+                ret = m_zed.step();
+            }
         }
+        m_runMutex.unlock();
 
         m_mutex.lock();
         // check again
@@ -164,6 +184,7 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(&m_zedThread, &ZedThread::zedDebugPrint, this, &MainWindow::zedDebugPrint);
     connect(&m_zedThread, &ZedThread::zedErrorPrint, this, &MainWindow::zedErrorPrint);
     connect(&m_zedThread, &ZedThread::zedGamePrint, this, &MainWindow::zedGamePrint);
+    connect(&m_zedThread, &ZedThread::zedAddDisasm, this, &MainWindow::zedAddDisasm);
 
     QTimer::singleShot(UPDATE_TIMER_INTERVAL, this, SLOT(timerUpdateState()));
 }
@@ -191,14 +212,31 @@ void MainWindow::timerUpdateState() {
     // set game/debug text
     if (!m_gameStr[cur].isEmpty()) {
         ui->txtLog->insertPlainText(m_gameStr[cur]);
+        ui->txtLog->verticalScrollBar()->setValue(ui->txtLog->verticalScrollBar()->maximum());
         m_gameText[cur].reset();
         m_gameStr[cur].truncate(0);
     }
     if (!m_debugStr[cur].isEmpty()) {
         ui->txtSerialOut->insertPlainText(m_debugStr[cur]);
+        ui->txtSerialOut->verticalScrollBar()->setValue(ui->txtSerialOut->verticalScrollBar()->maximum());
         m_debugText[cur].reset();
         m_debugStr[cur].truncate(0);
     }
+    // add disasm instructions
+    /*auto len = m_disasmQueue[cur].size();
+    for (auto i = 0; i < len; ++i) {
+        ui->lstDisasm->addItems(m_disasmQueue[cur]);
+    }
+    m_disasmQueue[cur].clear();*/
+    m_disasmMutex.lock();
+    int i = 0;
+    // NOTE: adding a rate limit here
+    while (!m_disasmQueue.isEmpty() && i < 10) {
+        ui->lstDisasm->addItem(m_disasmQueue.dequeue());
+        ++i;
+    }
+    m_disasmMutex.unlock();
+    ui->lstDisasm->verticalScrollBar()->setValue(ui->lstDisasm->verticalScrollBar()->maximum());
     
     QTimer::singleShot(UPDATE_TIMER_INTERVAL, this, SLOT(timerUpdateState()));
 }
@@ -218,6 +256,13 @@ void MainWindow::zedErrorPrint(const QString& str) {
 void MainWindow::zedGamePrint(const QString& str) {
     QMutexLocker locker(&m_bufferMutex);
     m_gameText[m_curBuffer] << str;
+}
+
+void MainWindow::zedAddDisasm(const QString& str) {
+    /*QMutexLocker locker(&m_bufferMutex);
+    m_disasmQueue[m_curBuffer].append(str);*/
+    QMutexLocker locker(&m_disasmMutex);
+    m_disasmQueue.enqueue(str);
 }
 
 void MainWindow::on_btnRefresh_clicked()
@@ -247,12 +292,12 @@ void MainWindow::on_btnLoad_clicked()
     }
     QByteArray blob = file.readAll();
 
-    m_zedThread.loadStory(blob);
-
-    QMessageBox msgBox;
-    msgBox.setText(QString("Loaded story '%0', %1 bytes").arg(filename).arg(blob.size()));
-    msgBox.setIcon(QMessageBox::Icon::Information);
-    msgBox.exec();
+    if (m_zedThread.loadStory(blob)) {
+        QMessageBox msgBox;
+        msgBox.setText(QString("Loaded story '%0', %1 bytes").arg(filename).arg(blob.size()));
+        msgBox.setIcon(QMessageBox::Icon::Information);
+        msgBox.exec();
+    }
 }
 
 void MainWindow::on_btnStep_clicked() {

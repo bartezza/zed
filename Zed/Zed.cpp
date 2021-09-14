@@ -330,6 +330,35 @@ const char g_zalphabets[3 * 26 + 1] = {
 #define ZCHAR_SINGLE_CLICK  254
 
 
+void TextBuffer::reset() {
+    ptr = 0;
+    buf[0] = '\0';
+}
+
+void TextBuffer::printf(const char* str, ...) {
+    va_list args;
+    va_start(args, str);
+    vsnprintf(&buf[ptr], sizeof(buf) - ptr, str, args);
+    va_end(args);
+    ptr = strlen(buf);
+}
+
+void TextBuffer::copy(const char* str) {
+    size_t len = strlen(str);
+    if ((ptr + len) < (sizeof(buf) - 1)) {
+        memcpy(&buf[ptr], str, len + 1);
+        ptr += len;
+    }
+}
+
+void TextBuffer::copy(char ch) {
+    if (ptr < (sizeof(buf) - 1)) {
+        buf[ptr++] = ch;
+        buf[ptr] = '\0';
+    }
+}
+
+
 void Zed::copyStory(const uint8_t* mem, size_t memSize) {
     // alloc and copy memory
     m_state.mem.resize(memSize);
@@ -410,12 +439,12 @@ int Zed::parseZCharacters(const uint8_t *buf, uint32_t numBuf, char* out, uint32
                 curOut += ret;
             }
             else {
-                printf("\nERROR: Requested abbreviation %u with abbreviations disabled\n", abbrevIndex);
+                errorPrintf("Requested abbreviation %u with abbreviations disabled", abbrevIndex);
             }
             ++i;
         }
         else if (curCh <= 5) {
-            printf("TODO: handle shift locking (curCh = %02X)\n", curCh);
+            debugPrintf("TODO: handle shift locking (curCh = %02X)\n", curCh);
             // assert(false);
         }
         /*else if (curCh == ZCHAR_DELETE) {
@@ -556,13 +585,13 @@ void Zed::debugZText(const uint8_t* text) {
 }
 
 // TODO: remove this?
-void Zed::debugPrintVarName(uint8_t var) {
+void Zed::debugPrintVarName(TextBuffer& tb, uint8_t var) {
     if (var == 0)
-        debugPrint(" (SP)");
+        tb.copy(" (SP)");
     else if (var <= 0x0F)
-        debugPrintf(" L%02X", var - 1);
+        tb.printf(" L%02X", var - 1);
     else
-        debugPrintf(" G%02X", var - 0x10);
+        tb.printf(" G%02X", var - 0x10);
 }
 
 uint16_t Zed::getVar(uint8_t idx) {
@@ -682,17 +711,17 @@ void Zed::readBranchInfo(uint32_t &curPc, bool &jumpCond, uint32_t &dest) const 
     }
 }
 
-void Zed::disasmBranch(uint32_t& curPc) {
+void Zed::disasmBranch(TextBuffer& tb, uint32_t& curPc) {
     // read info
     bool jumpCond;
     uint32_t dest;
     readBranchInfo(curPc, jumpCond, dest);
     // print jump condition
-    debugPrint(jumpCond ? " [TRUE]" : " [FALSE]");
+    tb.copy(jumpCond ? " [TRUE]" : " [FALSE]");
     // print dest
-    if (dest == 0) debugPrint(" RFALSE");
-    else if (dest == 1) debugPrint(" RTRUE");
-    else debugPrintf(" %04X", dest);
+    if (dest == 0) tb.copy(" RFALSE");
+    else if (dest == 1) tb.copy(" RTRUE");
+    else tb.printf(" %04X", dest);
 }
 
 void Zed::execBranch(bool condition) {
@@ -745,8 +774,13 @@ uint16_t Zed::getPropertyDefault(uint16_t propIndex) {
     return READ16(baseObjs + propIndex * 2);
 }
 
-void Zed::debugPrintObjName(const ZObject_v1* obj) {
-    debugPrint(" '"); debugZText(&m_state.mem[BE16(obj->props) + 1]); debugPrint("'");
+void Zed::debugPrintObjName(TextBuffer& tb, const ZObject_v1* obj) {
+    // debugPrint(" '"); debugZText(&m_state.mem[BE16(obj->props) + 1]); debugPrint("'");
+    tb.copy(" '");
+    const uint8_t* text = &m_state.mem[BE16(obj->props) + 1];
+    parseZText(text, &tb.buf[tb.ptr], sizeof(tb.buf) - tb.ptr, nullptr);
+    tb.ptr = strlen(tb.buf);
+    tb.copy("'");
 }
 
 bool Zed::exec0OPInstruction(uint8_t opcode) {
@@ -1298,12 +1332,13 @@ bool Zed::parseOpcodeAndOperands(ZMachineTemp& temp) const {
     return true;
 }
 
-void Zed::disasmCurInstruction() {
+void Zed::disasmCurInstruction(TextBuffer &tb) {
     // get current pc
     ZMachineTemp temp;
     uint32_t initPc = m_state.pc;
     temp.curPc = initPc;
-    debugPrintf("[%04X] ", temp.curPc);
+    tb.reset();
+    tb.printf("[%04X] ", temp.curPc);
 
     // if (temp.curPc == 0x54C1) DebugBreak();
 
@@ -1314,7 +1349,7 @@ void Zed::disasmCurInstruction() {
     if (temp.opcode == OPC_EXTENDED) { // only v5+
         // operand count is VAR (see VAR form below)
         // opcode in second byte
-        assert(false);
+        tb.copy("extended opcode not supported yet");
         return;
     }
     else if ((temp.opcode & OPC_FORM_MASK) == OPC_FORM_VARIABLE) {
@@ -1351,40 +1386,44 @@ void Zed::disasmCurInstruction() {
         opInfo = &g_opcodes2OP[temp.opcode & 0b00011111];
     }
     // print opcode
-    debugPrint(opInfo->name);
+    tb.copy(opInfo->name);
     // print operands
     for (uint8_t i = 0; i < temp.numOps; ++i) {
         switch (temp.opTypes[i]) {
             case OPTYPE_SMALL_CONST:
-                debugPrintf(" #%02X", temp.opVals[i]);
+                tb.printf(" #%02X", temp.opVals[i]);
                 break;
             case OPTYPE_LARGE_CONST:
-                debugPrintf(" #%04X", temp.opVals[i]);
+                tb.printf(" #%04X", temp.opVals[i]);
                 break;
             case OPTYPE_VAR:
-                debugPrintVarName(temp.opVars[i]);
+                debugPrintVarName(tb, temp.opVars[i]);
                 break;
         }
         // print object names eventually
         if ((opInfo->flags & OPF_OBJ1) && (i == 0) && (temp.opTypes[i] != OPTYPE_VAR))
-            debugPrintObjName(getObject(temp.opVals[i]));
+            debugPrintObjName(tb, getObject(temp.opVals[i]));
         else if ((opInfo->flags & OPF_OBJ2) && (i == 1) && (temp.opTypes[i] != OPTYPE_VAR))
-            debugPrintObjName(getObject(temp.opVals[i]));
+            debugPrintObjName(tb, getObject(temp.opVals[i]));
     }
     // parse branch info
     if (opInfo->flags & OPF_BRANCH)
-        disasmBranch(temp.curPc);
+        disasmBranch(tb, temp.curPc);
     // parse storing of result
     if (opInfo->flags & OPF_STORE) {
-        debugPrint(" ->");
-        debugPrintVarName(m_state.mem[temp.curPc++]);
+        tb.copy(" ->");
+        debugPrintVarName(tb, m_state.mem[temp.curPc++]);
     }
-    // finished
-    debugPrint("\n");
 }
 
 bool Zed::step() {
     bool ret;
+
+    // basic check
+    if ((size_t)m_state.pc >= m_state.mem.size()) {
+        errorPrint("PC out of memory");
+        return false;
+    }
 
     // set current pc
     m_temp.curPc = m_state.pc;
@@ -1403,7 +1442,7 @@ bool Zed::step() {
     if (m_temp.opcode == OPC_EXTENDED) { // only v5+
         // operand count is VAR (see VAR form below)
         // opcode in second byte
-        assert(false);
+        errorPrint("Extended opcode not implemented yet");
         return false;
     }
     else if ((m_temp.opcode & OPC_FORM_MASK) == OPC_FORM_VARIABLE) {

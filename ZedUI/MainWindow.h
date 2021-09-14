@@ -12,6 +12,8 @@
 #include <QMutex>
 #include <QWaitCondition>
 #include <QTextStream>
+#include <QStringList>
+#include <QQueue>
 #include "../Zed/Zed.h"
 
 // prototypes
@@ -34,13 +36,14 @@ public:
     void continueStory();
     void resetStory();
 
-public slots:
-    void loadStory(const QByteArray &bytes);
+public:
+    bool loadStory(const QByteArray &bytes);
 
 signals:
     void zedDebugPrint(const QString &str);
     void zedErrorPrint(const QString& str);
     void zedGamePrint(const QString& str);
+    void zedAddDisasm(const QString& str);
 
 protected:
     QMutex m_mutex;
@@ -48,6 +51,7 @@ protected:
     bool m_singleStep = false;
     bool m_reset = false;
     bool m_abort = false;
+    QMutex m_runMutex;
 
     void run() override;
 };
@@ -75,6 +79,7 @@ private slots:
     void zedDebugPrint(const QString& str);
     void zedErrorPrint(const QString& str);
     void zedGamePrint(const QString& str);
+    void zedAddDisasm(const QString& str);
 
     void on_btnRefresh_clicked();
 
@@ -96,6 +101,11 @@ private:
     QString m_debugStr[2];
     int m_curBuffer = 0;
     QMutex m_bufferMutex;
+    
+    // QStringList m_disasmQueue[2];
+
+    QMutex m_disasmMutex;
+    QQueue<QString> m_disasmQueue;
 };
 
 //============================================================//
