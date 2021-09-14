@@ -10,6 +10,8 @@
 //QTimer::singleShot(0, this, SLOT(update())); 
 // QTimer::singleShot(10, this, SLOT(update()));
 
+#define UPDATE_TIMER_INTERVAL       100
+
 //============================================================//
 
 #define STRING_EVENT_LOG                    0
@@ -22,9 +24,21 @@
 ZedThread::ZedThread(MainWindow* mainWindow) :
     QThread(mainWindow)
 {
+#if 0
     m_zed.debugPrintCallback = std::bind(&ZedThread::zedDebugPrint, this, std::placeholders::_1);
     m_zed.errorPrintCallback = std::bind(&ZedThread::zedErrorPrint, this, std::placeholders::_1);
     m_zed.gamePrintCallback = std::bind(&ZedThread::zedGamePrint, this, std::placeholders::_1);
+#else
+    m_zed.debugPrintCallback = [&](const char* data) {
+        emit zedDebugPrint(QString(data));
+    };
+    m_zed.errorPrintCallback = [&](const char* data) {
+        emit zedErrorPrint(QString(data));
+    };
+    m_zed.gamePrintCallback = [&](const char* data) {
+        emit zedGamePrint(QString(data));
+    };
+#endif
 }
 
 ZedThread::~ZedThread() {
@@ -38,7 +52,7 @@ ZedThread::~ZedThread() {
     wait();
 }
 
-void ZedThread::zedDebugPrint(const char* str) {
+/*void ZedThread::zedDebugPrint(const char* str) {
     qDebug(str);
 }
 
@@ -48,7 +62,7 @@ void ZedThread::zedErrorPrint(const char* str) {
 
 void ZedThread::zedGamePrint(const char* str) {
     qDebug(str);
-}
+}*/
 
 void ZedThread::loadStory(const QByteArray& data) {
     
@@ -112,6 +126,7 @@ void ZedThread::run() {
         m_singleStep = false;
         m_mutex.unlock();
 
+        // execute action
         if (reset) {
             m_zed.reset();
         }
@@ -141,7 +156,16 @@ MainWindow::MainWindow(QWidget* parent) :
 {
     ui->setupUi(this);
 
-    QTimer::singleShot(10, this, SLOT(timerUpdateState()));
+    m_gameText[0].setString(&m_gameStr[0]);
+    m_gameText[1].setString(&m_gameStr[1]);
+    m_debugText[0].setString(&m_debugStr[0]);
+    m_debugText[1].setString(&m_debugStr[1]);
+
+    connect(&m_zedThread, &ZedThread::zedDebugPrint, this, &MainWindow::zedDebugPrint);
+    connect(&m_zedThread, &ZedThread::zedErrorPrint, this, &MainWindow::zedErrorPrint);
+    connect(&m_zedThread, &ZedThread::zedGamePrint, this, &MainWindow::zedGamePrint);
+
+    QTimer::singleShot(UPDATE_TIMER_INTERVAL, this, SLOT(timerUpdateState()));
 }
 
 MainWindow::~MainWindow()
@@ -150,6 +174,12 @@ MainWindow::~MainWindow()
 }
 
 void MainWindow::timerUpdateState() {
+    // change buffer, for double buffering
+    m_bufferMutex.lock();
+    int cur = m_curBuffer;
+    m_curBuffer ^= 1;
+    m_bufferMutex.unlock();
+
     // copy stuff from zed instance
     // we don't care if we have race conditions here as it's just for displaying
     auto pc = m_zedThread.m_zed.m_state.pc;
@@ -157,8 +187,37 @@ void MainWindow::timerUpdateState() {
 
     ui->txtPC->setPlainText(QString::number(pc, 16));
     ui->txtSP->setPlainText(QString::number(sp, 16));
+
+    // set game/debug text
+    if (!m_gameStr[cur].isEmpty()) {
+        ui->txtLog->insertPlainText(m_gameStr[cur]);
+        m_gameText[cur].reset();
+        m_gameStr[cur].truncate(0);
+    }
+    if (!m_debugStr[cur].isEmpty()) {
+        ui->txtSerialOut->insertPlainText(m_debugStr[cur]);
+        m_debugText[cur].reset();
+        m_debugStr[cur].truncate(0);
+    }
     
-    QTimer::singleShot(10, this, SLOT(timerUpdateState()));
+    QTimer::singleShot(UPDATE_TIMER_INTERVAL, this, SLOT(timerUpdateState()));
+}
+
+void MainWindow::zedDebugPrint(const QString &str) {
+    QMutexLocker locker(&m_bufferMutex);
+    m_debugText[m_curBuffer] << str;
+}
+
+void MainWindow::zedErrorPrint(const QString& str) {
+    QMessageBox msgBox;
+    msgBox.setText(str);
+    msgBox.setIcon(QMessageBox::Icon::Critical);
+    msgBox.exec();
+}
+
+void MainWindow::zedGamePrint(const QString& str) {
+    QMutexLocker locker(&m_bufferMutex);
+    m_gameText[m_curBuffer] << str;
 }
 
 void MainWindow::on_btnRefresh_clicked()

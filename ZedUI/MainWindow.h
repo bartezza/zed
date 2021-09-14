@@ -11,6 +11,7 @@
 #include <QThread>
 #include <QMutex>
 #include <QWaitCondition>
+#include <QTextStream>
 #include "../Zed/Zed.h"
 
 // prototypes
@@ -36,9 +37,10 @@ public:
 public slots:
     void loadStory(const QByteArray &bytes);
 
-    void zedDebugPrint(const char* str);
-    void zedErrorPrint(const char* str);
-    void zedGamePrint(const char* str);
+signals:
+    void zedDebugPrint(const QString &str);
+    void zedErrorPrint(const QString& str);
+    void zedGamePrint(const QString& str);
 
 protected:
     QMutex m_mutex;
@@ -70,6 +72,10 @@ public:
 private slots:
     void timerUpdateState();
 
+    void zedDebugPrint(const QString& str);
+    void zedErrorPrint(const QString& str);
+    void zedGamePrint(const QString& str);
+
     void on_btnRefresh_clicked();
 
     void on_btnLoad_clicked();
@@ -82,6 +88,14 @@ private slots:
 
 private:
     Ui::MainWindow *ui;
+    
+    // using double buffering here
+    QTextStream m_gameText[2];
+    QTextStream m_debugText[2];
+    QString m_gameStr[2];
+    QString m_debugStr[2];
+    int m_curBuffer = 0;
+    QMutex m_bufferMutex;
 };
 
 //============================================================//
