@@ -390,13 +390,13 @@ void ZMachineState::reset() {
     assert(header->version <= 3);
 }
 
-int Zed::parseZCharacters(const uint8_t *buf, uint32_t numBuf, char* out, uint32_t outSize, bool enableAbbrev) {
+size_t Zed::parseZCharacters(const uint8_t *buf, size_t numBuf, char* out, size_t outSize, bool enableAbbrev) {
     // TODO: change this to output ZSCII chars (not assuming ASCII as output)
 
     // NOTE: the code below is for version >= 3 only
     // parse the z-chars
-    uint32_t curOut = 0;
-    for (uint32_t i = 0; i < numBuf; ++i) {
+    size_t curOut = 0;
+    for (size_t i = 0; i < numBuf; ++i) {
         uint8_t curCh = buf[i];
         uint8_t alphabet = 0;
         if (curCh == ZCHAR_SHIFT_A1) {
@@ -434,7 +434,7 @@ int Zed::parseZCharacters(const uint8_t *buf, uint32_t numBuf, char* out, uint32
                 uint32_t addr2 = READ16(addr) * 2;
                 // printf("[DEBUG] abbrevIndex = %u, addr = %04X, addr2 = %04X\n", abbrevIndex, addr, addr2);
                 // print abbreviation at location
-                int ret = parseZText(&m_state.mem[addr2], &out[curOut], outSize - curOut, nullptr, false);
+                size_t ret = parseZText(&m_state.mem[addr2], &out[curOut], outSize - curOut, nullptr, false);
                 // advance curOut according to the abbreviation
                 curOut += ret;
             }
@@ -461,7 +461,7 @@ int Zed::parseZCharacters(const uint8_t *buf, uint32_t numBuf, char* out, uint32
     return curOut;
 }
 
-int Zed::parseZText(const uint8_t* text, char* out, uint32_t outSize, uint32_t* outTextBytesRead, bool enableAbbrev) {
+size_t Zed::parseZText(const uint8_t* text, char* out, size_t outSize, size_t* outTextBytesRead, bool enableAbbrev) {
 
     /*
     --first byte-------   --second byte---
@@ -472,9 +472,9 @@ int Zed::parseZText(const uint8_t* text, char* out, uint32_t outSize, uint32_t* 
     //  4 13 10  17 17 20  5 18 5  7 5 5.
 
     // read all z-text and extract the z-chars into a temporary buffer
-    uint32_t i = 0;
+    size_t i = 0;
     uint8_t buf[4096];
-    uint32_t curBuf = 0;
+    size_t curBuf = 0;
     while (1) {
         // for (int i = 0; i < 10; i += 2) {
         uint8_t a = (text[i] >> 2) & 0x1F;
@@ -793,9 +793,9 @@ bool Zed::exec0OPInstruction(uint8_t opcode) {
         break;
     case OPC_PRINT: {
         char out[1024];
-        uint32_t bytesRead = 0;
-        int curOut = parseZText(&m_state.mem[m_temp.curPc], out, sizeof(out), &bytesRead);
-        m_temp.curPc += bytesRead;
+        size_t bytesRead = 0;
+        size_t curOut = parseZText(&m_state.mem[m_temp.curPc], out, sizeof(out), &bytesRead);
+        m_temp.curPc += (uint32_t) bytesRead;
         gamePrint(out);
         break;
     }
@@ -1332,7 +1332,13 @@ bool Zed::parseOpcodeAndOperands(ZMachineTemp& temp) const {
     return true;
 }
 
-void Zed::disasmCurInstruction(TextBuffer &tb) {
+bool Zed::disasmCurInstruction(TextBuffer &tb) {
+    // basic check
+    if ((size_t)m_state.pc >= m_state.mem.size()) {
+        errorPrint("PC out of memory");
+        return false;
+    }
+
     // get current pc
     ZMachineTemp temp;
     uint32_t initPc = m_state.pc;
@@ -1350,7 +1356,7 @@ void Zed::disasmCurInstruction(TextBuffer &tb) {
         // operand count is VAR (see VAR form below)
         // opcode in second byte
         tb.copy("extended opcode not supported yet");
-        return;
+        return false;
     }
     else if ((temp.opcode & OPC_FORM_MASK) == OPC_FORM_VARIABLE) {
         // if bit5 == 0 => 2OP, else VAR
@@ -1414,6 +1420,7 @@ void Zed::disasmCurInstruction(TextBuffer &tb) {
         tb.copy(" ->");
         debugPrintVarName(tb, m_state.mem[temp.curPc++]);
     }
+    return true;
 }
 
 bool Zed::step() {

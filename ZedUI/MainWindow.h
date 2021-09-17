@@ -81,15 +81,10 @@ private slots:
     void zedGamePrint(const QString& str);
     void zedAddDisasm(const QString& str);
 
-    void on_btnRefresh_clicked();
-
-    void on_btnLoad_clicked();
-    void on_btnStep_clicked();
-
+    void on_actionLoadStory_triggered();
     void on_btnRun_clicked();
+    void on_btnStep_clicked();
     void on_btnReset_clicked();
-    
-    void on_btnDisasm_clicked();
 
 private:
     Ui::MainWindow *ui;

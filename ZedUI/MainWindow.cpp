@@ -186,11 +186,15 @@ MainWindow::MainWindow(QWidget* parent) :
     connect(&m_zedThread, &ZedThread::zedGamePrint, this, &MainWindow::zedGamePrint);
     connect(&m_zedThread, &ZedThread::zedAddDisasm, this, &MainWindow::zedAddDisasm);
 
+    ui->btnRun->setEnabled(false);
+    ui->btnStep->setEnabled(false);
+    ui->btnReset->setEnabled(false);
+    ui->btnOk->setEnabled(false);
+
     QTimer::singleShot(UPDATE_TIMER_INTERVAL, this, SLOT(timerUpdateState()));
 }
 
-MainWindow::~MainWindow()
-{
+MainWindow::~MainWindow() {
     delete ui;
 }
 
@@ -265,13 +269,7 @@ void MainWindow::zedAddDisasm(const QString& str) {
     m_disasmQueue.enqueue(str);
 }
 
-void MainWindow::on_btnRefresh_clicked()
-{
-
-}
-
-void MainWindow::on_btnLoad_clicked()
-{
+void MainWindow::on_actionLoadStory_triggered() {
     // load story
     // const char* filename = "..\\..\\..\\..\\Data\\zork1-r119-s880429.z3";
     // const char* filename = "..\\..\\..\\..\\Data\\zork1-r88-s840726.z3u";
@@ -293,15 +291,14 @@ void MainWindow::on_btnLoad_clicked()
     QByteArray blob = file.readAll();
 
     if (m_zedThread.loadStory(blob)) {
-        QMessageBox msgBox;
+        /*QMessageBox msgBox;
         msgBox.setText(QString("Loaded story '%0', %1 bytes").arg(filename).arg(blob.size()));
         msgBox.setIcon(QMessageBox::Icon::Information);
-        msgBox.exec();
+        msgBox.exec();*/
+        ui->btnRun->setEnabled(true);
+        ui->btnStep->setEnabled(true);
+        ui->btnReset->setEnabled(true);
     }
-}
-
-void MainWindow::on_btnStep_clicked() {
-    m_zedThread.stepStory();
 }
 
 void MainWindow::customEvent(QEvent *e) {
@@ -323,29 +320,18 @@ void MainWindow::customEvent(QEvent *e) {
     // QApplication::postEvent(this, new StaticEvent<STATIC_EVENT_DISPLAY_CPU_STATE>());
 }
 
-void MainWindow::on_btnRun_clicked()
-{
+void MainWindow::on_btnRun_clicked() {
     m_zedThread.continueStory();
 }
 
-void MainWindow::on_btnReset_clicked()
-{
+void MainWindow::on_btnStep_clicked() {
+    m_zedThread.stepStory();
+}
+
+void MainWindow::on_btnReset_clicked() {
     m_zedThread.resetStory();
 }
 
-void MainWindow::on_btnDisasm_clicked()
-{
-    // update disasm output
-    ui->lstDisasm->clear();
-    ui->lstDisasm->addItem("lol");
-    ui->lstDisasm->addItem("lol");
-    ui->lstDisasm->addItem("lol");
-    ui->lstDisasm->addItem("lol");
-    // update disasm line
-    ui->lstDisasm->setCurrentRow(2);
-}
-
-void MainWindow::closeEvent(QCloseEvent *e)
-{
+void MainWindow::closeEvent(QCloseEvent *e) {
 
 }

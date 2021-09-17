@@ -105,11 +105,11 @@ public:
 
     bool step();
 
-    void disasmCurInstruction(TextBuffer& tb);
+    bool disasmCurInstruction(TextBuffer& tb);
 
-    int parseZText(const uint8_t* text, char* out, uint32_t outSize, uint32_t* outTextBytesRead, bool enableAbbrev = true);
+    size_t parseZText(const uint8_t* text, char* out, size_t outSize, size_t* outTextBytesRead, bool enableAbbrev = true);
 
-    int parseZCharacters(const uint8_t* buf, uint32_t numBuf, char* out, uint32_t outSize, bool enableAbbrev = true);
+    size_t parseZCharacters(const uint8_t* buf, size_t numBuf, char* out, size_t outSize, bool enableAbbrev = true);
 
 protected:
     void debugZText(const uint8_t* text);
