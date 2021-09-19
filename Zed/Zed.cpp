@@ -411,7 +411,7 @@ size_t ZMachine::parseZCharacters(const uint8_t *buf, size_t numBuf, char* out, 
             if (i >= (numBuf - 1))
                 break;
             alphabet = 1;
-            // advance
+            // go ahead and read char
             curCh = buf[++i];
         }
         else if (buf[i] == ZCHAR_SHIFT_A2) {
@@ -419,12 +419,18 @@ size_t ZMachine::parseZCharacters(const uint8_t *buf, size_t numBuf, char* out, 
                 break;
             // check for special char for 10 bits ZSCII
             if (buf[i + 1] == ZCHAR_A2_10BITS) {
-                // TODO
-                assert(false);
+                if (i >= (numBuf - 2))
+                    break;
+                // go ahead and read 5 + 5 bits char
+                curCh = buf[++i];
+                // NOTE: // still using 8bits, as everything > 255 is undefined per spec
+                curCh = (uint8_t)((curCh << 5) | buf[++i]);
+            }
+            else {
+                // go ahead and read char
+                curCh = buf[++i];
             }
             alphabet = 2;
-            // advance
-            curCh = buf[++i];
         }
         // parse z-char
         if (curCh == 0x00) {
@@ -645,8 +651,6 @@ void ZMachine::setVar(uint8_t idx, uint16_t value) {
 }
 
 bool ZMachine::execCall() {
-    // if (m_state.pc == 0x8DA7) DebugBreak();
-    
     // read where to store the result
     uint8_t storeVar = m_state.mem[m_temp.curPc++];
 
@@ -853,6 +857,10 @@ bool ZMachine::exec0OPInstruction(uint8_t opcode) {
         gamePrint(out);
         break;
     }
+    case OPC_RET_POPPED:
+        // ret_popped
+        // Pops top of stack and returns that. (This is equivalent to ret sp, but is one byte cheaper.)
+        return execRet(getVar(0));
     case OPC_NEWLINE: {
         gamePrint("\n");
         break;
