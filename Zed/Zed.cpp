@@ -645,17 +645,28 @@ void ZMachine::setVar(uint8_t idx, uint16_t value) {
 }
 
 bool ZMachine::execCall() {
+    // if (m_state.pc == 0x8DA7) DebugBreak();
+    
     // read where to store the result
     uint8_t storeVar = m_state.mem[m_temp.curPc++];
+
+    // get new location
+    uint32_t newPc = packedAddressToByte(m_temp.opVals[0]); // packed
+    assert(newPc < m_state.mem.size());
+    // if location is 0 it means NOP
+    if (newPc == 0) {
+        // do nothing and store 0 as return value
+        setVar(storeVar, 0);
+        return true;
+    }
+
     // execute routine
     // save call frame ptr
     uint32_t callBase = m_state.sp;
     // store old call base
     m_state.stackMem[m_state.sp++] = (uint16_t)((m_state.callBase >> 16) & 0xFFFF);
     m_state.stackMem[m_state.sp++] = (uint16_t)(m_state.callBase & 0xFFFF);
-    // get new location
-    uint32_t newPc = packedAddressToByte(m_temp.opVals[0]); // packed
-    assert(newPc < m_state.mem.size());
+    
     // store ret location, pointer to byte after the CALL
     m_state.stackMem[m_state.sp++] = (uint16_t)((m_temp.curPc >> 16) & 0xFFFF);
     m_state.stackMem[m_state.sp++] = (uint16_t)(m_temp.curPc & 0xFFFF);
