@@ -964,9 +964,15 @@ bool ZMachine::exec2OPInstruction(uint8_t opcode) {
         else
             execBranch((m_temp.opVals[0] == m_temp.opVals[1]) || (m_temp.opVals[0] == m_temp.opVals[2]) || (m_temp.opVals[0] == m_temp.opVals[3]));
         break;
+    case OPC_JL: {
+        // jl a b ? (label)
+        // Jump if a < b (using a signed 16 - bit comparison).
+        execBranch((int16_t)val1 < (int16_t)val2);
+        break;
+    }
     case OPC_JG: {
         // jg a b ?(label)
-        // Jump if a > b (using a signed 16-bit comparison)
+        // Jump if a > b (using a signed 16-bit comparison).
         execBranch((int16_t)val1 > (int16_t)val2);
         break;
     }
