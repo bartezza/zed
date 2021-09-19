@@ -8,6 +8,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h> // for DebugBreak
 
+using namespace Zed;
+
 
 #define BIT0        0b00000001
 #define BIT1        0b00000010
@@ -153,12 +155,6 @@
 #define OPTYPE_SMALL_CONST          0x01
 #define OPTYPE_VAR                  0x02
 #define OPTYPE_OMITTED              0x03
-
-#define CALLFRAME_OFF_PC                0
-#define CALLFRAME_OFF_RET               1
-#define CALLFRAME_OFF_STORE_VAR         2
-#define CALLFRAME_OFF_NUM_LOCALS        3
-#define CALLFRAME_OFF_LOCALS            4
 
 // v1-3
 #define packedAddressToByte(_addr) \
@@ -359,15 +355,22 @@ void TextBuffer::copy(char ch) {
 }
 
 
-void Zed::copyStory(const uint8_t* mem, size_t memSize) {
+void ZMachine::copyStory(const uint8_t* mem, size_t memSize) {
     // alloc and copy memory
     m_state.mem.resize(memSize);
     memcpy(&m_state.mem[0], mem, memSize);
+
+    // setup interpreter-based flags
+    // status bar not supported
+    ((ZHeader *)&m_state.mem[0])->flags1 |= BIT4;
+    // Tandy bit
+    ((ZHeader *)&m_state.mem[0])->flags1 &= ~BIT3;
+
     // reset state
     reset();
 }
 
-void Zed::reset() {
+void ZMachine::reset() {
     m_state.reset();
 
     debugPrintf("highMemory = %04X, staticMemory = %04X\n", BE16(m_state.header->highMemory), BE16(m_state.header->staticMemory));
@@ -376,21 +379,26 @@ void Zed::reset() {
 }
 
 void ZMachineState::reset() {
+    // set header
     header = (const ZHeader*)&mem[0];
-
+    // initialize pc
     pc = BE16(header->initPC);
-
-    callsPtr.resize(1024);
-    curCall = 0;
-
+    // initialize stack
     stackMem.resize(64 * 1024);
-    sp = 0;
-
+    // create a fake initial call frame
+    callBase = 0;
+    stackMem[CALL_OLD_BASE_HI] = 0xFFFF; // sentinel value to detect invalid RETs from main routine
+    stackMem[CALL_OLD_BASE_LO] = 0xFFFF;
+    stackMem[CALL_RET_HI] = 0xFFFF;
+    stackMem[CALL_RET_LO] = 0xFFFF;
+    stackMem[CALL_STORE_VAR] = 0;
+    stackMem[CALL_NUM_LOCALS] = 0;
+    bp = sp = CALL_LOCALS;
     // CHECK
     assert(header->version <= 3);
 }
 
-size_t Zed::parseZCharacters(const uint8_t *buf, size_t numBuf, char* out, size_t outSize, bool enableAbbrev) {
+size_t ZMachine::parseZCharacters(const uint8_t *buf, size_t numBuf, char* out, size_t outSize, bool enableAbbrev) {
     // TODO: change this to output ZSCII chars (not assuming ASCII as output)
 
     // NOTE: the code below is for version >= 3 only
@@ -461,7 +469,7 @@ size_t Zed::parseZCharacters(const uint8_t *buf, size_t numBuf, char* out, size_
     return curOut;
 }
 
-size_t Zed::parseZText(const uint8_t* text, char* out, size_t outSize, size_t* outTextBytesRead, bool enableAbbrev) {
+size_t ZMachine::parseZText(const uint8_t* text, char* out, size_t outSize, size_t* outTextBytesRead, bool enableAbbrev) {
 
     /*
     --first byte-------   --second byte---
@@ -526,7 +534,7 @@ char zsciiToAscii(uint8_t ch) {
     }
 }
 
-void Zed::debugPrintf(const char* fmt, ...) {
+void ZMachine::debugPrintf(const char* fmt, ...) {
     char buffer[1024];
     va_list args;
     va_start(args, fmt);
@@ -535,14 +543,14 @@ void Zed::debugPrintf(const char* fmt, ...) {
     debugPrint(buffer);
 }
 
-void Zed::debugPrint(const char* text) {
+void ZMachine::debugPrint(const char* text) {
     if (debugPrintCallback)
         debugPrintCallback(text);
     else
         fputs(text, stdout);
 }
 
-void Zed::errorPrintf(const char* fmt, ...) {
+void ZMachine::errorPrintf(const char* fmt, ...) {
     char buffer[1024];
     va_list args;
     va_start(args, fmt);
@@ -551,7 +559,7 @@ void Zed::errorPrintf(const char* fmt, ...) {
     errorPrint(buffer);
 }
 
-void Zed::errorPrint(const char* text) {
+void ZMachine::errorPrint(const char* text) {
     if (errorPrintCallback)
         errorPrintCallback(text);
     else {
@@ -561,7 +569,7 @@ void Zed::errorPrint(const char* text) {
     }
 }
 
-void Zed::gamePrintf(const char* fmt, ...) {
+void ZMachine::gamePrintf(const char* fmt, ...) {
     char buffer[1024];
     va_list args;
     va_start(args, fmt);
@@ -570,7 +578,7 @@ void Zed::gamePrintf(const char* fmt, ...) {
     gamePrint(buffer);
 }
 
-void Zed::gamePrint(const char* text) {
+void ZMachine::gamePrint(const char* text) {
     if (gamePrintCallback)
         gamePrintCallback(text);
     else {
@@ -578,14 +586,14 @@ void Zed::gamePrint(const char* text) {
     }
 }
 
-void Zed::debugZText(const uint8_t* text) {
+void ZMachine::debugZText(const uint8_t* text) {
     char out[1024];
     parseZText(text, out, sizeof(out), nullptr);
     debugPrint(out);
 }
 
 // TODO: remove this?
-void Zed::debugPrintVarName(TextBuffer& tb, uint8_t var) {
+void ZMachine::debugPrintVarName(TextBuffer& tb, uint8_t var) {
     if (var == 0)
         tb.copy(" (SP)");
     else if (var <= 0x0F)
@@ -594,7 +602,7 @@ void Zed::debugPrintVarName(TextBuffer& tb, uint8_t var) {
         tb.printf(" G%02X", var - 0x10);
 }
 
-uint16_t Zed::getVar(uint8_t idx) {
+uint16_t ZMachine::getVar(uint8_t idx) {
     // check which var
     if (idx == 0) {
         // pop from stack
@@ -603,20 +611,19 @@ uint16_t Zed::getVar(uint8_t idx) {
     }
     else if (idx <= 0x0F) {
         // local variable
-        assert(m_state.curCall > 0);
-        const uint32_t callPtr = m_state.callsPtr[m_state.curCall - 1];
-        assert((idx - 1) < m_state.stackMem[callPtr + CALLFRAME_OFF_NUM_LOCALS]); // check number of locals
-        return m_state.stackMem[callPtr + CALLFRAME_OFF_LOCALS + idx - 1];
+        const uint16_t* locals = &m_state.stackMem[m_state.callBase + CALL_LOCALS];
+        uint16_t numLocals = m_state.stackMem[m_state.callBase + CALL_NUM_LOCALS];
+        assert((idx - 1) < numLocals); // check number of locals
+        return locals[idx - 1];
     }
     else {
         // globals
         uint32_t addr = BE16(m_state.header->globalsAddress) + (idx - 0x10) * 2;
         return READ16(addr);
     }
-};
+}
 
-
-void Zed::setVar(uint8_t idx, uint16_t value) {
+void ZMachine::setVar(uint8_t idx, uint16_t value) {
     // check which var
     if (idx == 0) {
         // push to stack
@@ -625,62 +632,98 @@ void Zed::setVar(uint8_t idx, uint16_t value) {
     }
     else if (idx <= 0x0F) {
         // local variable
-        assert(m_state.curCall > 0);
-        const uint32_t callPtr = m_state.callsPtr[m_state.curCall - 1];
-        assert((idx - 1) < m_state.stackMem[callPtr + CALLFRAME_OFF_NUM_LOCALS]); // check number of locals
-        m_state.stackMem[callPtr + CALLFRAME_OFF_LOCALS + idx - 1] = value;
+        uint16_t* locals = &m_state.stackMem[m_state.callBase + CALL_LOCALS];
+        uint16_t numLocals = m_state.stackMem[m_state.callBase + CALL_NUM_LOCALS];
+        assert((idx - 1) < numLocals); // check number of locals
+        locals[idx - 1] = value;
     }
     else {
         // globals
         uint32_t addr = BE16(m_state.header->globalsAddress) + (idx - 0x10) * 2;
         WRITE16(addr, value);
     }
-};
+}
 
-/*
-auto getOperand = [&](uint8_t _opType) -> uint16_t {
-    switch (_opType) {
-    case OPTYPE_LARGE_CONST: {
-        uint8_t b = mem[pc++];
-        uint8_t c = mem[pc++];
-        uint16_t _val = ((uint16_t)b << 8) | (uint16_t)c;
-        printf(" #%04X", _val);
-        return _val;
+bool ZMachine::execCall() {
+    // read where to store the result
+    uint8_t storeVar = m_state.mem[m_temp.curPc++];
+    // execute routine
+    // save call frame ptr
+    uint32_t callBase = m_state.sp;
+    // store old call base
+    m_state.stackMem[m_state.sp++] = (uint16_t)((m_state.callBase >> 16) & 0xFFFF);
+    m_state.stackMem[m_state.sp++] = (uint16_t)(m_state.callBase & 0xFFFF);
+    // get new location
+    uint32_t newPc = packedAddressToByte(m_temp.opVals[0]); // packed
+    assert(newPc < m_state.mem.size());
+    // store ret location, pointer to byte after the CALL
+    m_state.stackMem[m_state.sp++] = (uint16_t)((m_temp.curPc >> 16) & 0xFFFF);
+    m_state.stackMem[m_state.sp++] = (uint16_t)(m_temp.curPc & 0xFFFF);
+    // store return variable
+    m_state.stackMem[m_state.sp++] = storeVar;
+    // go to new location
+    m_temp.curPc = newPc;
+    // read number of local variables
+    uint8_t numLocals = m_state.mem[m_temp.curPc++];
+    if (numLocals >= 16) {
+        // should not happen by specs
+        errorPrint("Too many local variables");
+        return false;
     }
-    case OPTYPE_SMALL_CONST: {
-        uint16_t _val = (uint16_t)mem[pc++];
-        printf(" #%02X", _val);
-        return _val;
+    m_state.stackMem[m_state.sp++] = numLocals;
+    // read the initial values of the local variables, v1-4
+    for (uint8_t i = 0; i < numLocals; ++i) {
+        m_state.stackMem[m_state.sp + i] = READ16(m_temp.curPc);
+        m_temp.curPc += 2;
     }
-    case OPTYPE_VAR: {
-        uint8_t b = mem[pc++];
-        printVarName(b);
-        uint16_t _val = getVar(b);
-        return _val;
+    // overwrite them with function arguments
+    for (uint8_t i = 0; i < (m_temp.numOps - 1) && i < numLocals; ++i) {
+        m_state.stackMem[m_state.sp + i] = m_temp.opVals[i + 1];
     }
-    };
-    assert(false);
-    return 0;
-};
-*/
+    // advance sp
+    m_state.sp += numLocals;
+    // store callbase and bp
+    m_state.callBase = callBase;
+    m_state.bp = m_state.sp;
 
-void Zed::execRet(uint16_t val) {
-    assert(m_state.curCall > 0);
-    // decrement call index
-    --m_state.curCall;
+    // DEBUG: print call frame
+    const uint16_t* cb = &m_state.stackMem[m_state.callBase];
+    debugPrintf("Call frame: ret = %04X, numLocals = %u\n",
+        (uint32_t)(cb[CALL_RET_HI] << 16) | (uint32_t)(cb[CALL_RET_LO]),
+        cb[CALL_NUM_LOCALS]);
+    for (uint16_t i = 0; i < cb[CALL_NUM_LOCALS]; ++i)
+        debugPrintf("%u) %04X\n", i, cb[CALL_LOCALS + i]);
+    return true;
+}
+
+bool ZMachine::execRet(uint16_t val) {
+    // check if we are 
     // get store variable
-    uint8_t st = (uint8_t) m_state.stackMem[m_state.callsPtr[m_state.curCall] + CALLFRAME_OFF_STORE_VAR];
+    const uint16_t* cb = &m_state.stackMem[m_state.callBase];
+    uint8_t st = (uint8_t)cb[CALL_STORE_VAR];
     // get where to return to
-    m_temp.curPc = m_state.stackMem[m_state.callsPtr[m_state.curCall] + CALLFRAME_OFF_RET];
-    // set stack pointer to old location, before the CALL
-    m_state.sp = m_state.callsPtr[m_state.curCall];
+    m_temp.curPc = (uint32_t)(cb[CALL_RET_HI] << 16) | (uint32_t)(cb[CALL_RET_LO]);
+    // get old call base
+    uint32_t oldCallBase = (uint32_t)(cb[CALL_OLD_BASE_HI] << 16) | (uint32_t)(cb[CALL_OLD_BASE_LO]);
+    // check against sentinel value
+    if (oldCallBase == 0xFFFFFFFF) {
+        errorPrint("Trying to RET from the main routine");
+        return false;
+    }
+    // set stack to old location, before the CALL
+    m_state.sp = m_state.callBase;
+    // reset callbase and also old bp
+    m_state.callBase = oldCallBase;
+    const uint16_t* oldCb = &m_state.stackMem[oldCallBase];
+    m_state.bp = oldCallBase + CALL_LOCALS + oldCb[CALL_NUM_LOCALS];
     // store value
     // NOTE: this is done after having reset the stack since st could be 0,
     // meaning to push the return value onto the stack
     setVar(st, val);
+    return true;
 };
 
-void Zed::readBranchInfo(uint32_t &curPc, bool &jumpCond, uint32_t &dest) const {
+void ZMachine::readBranchInfo(uint32_t &curPc, bool &jumpCond, uint32_t &dest) const {
     // read branch info
     // bit7 == 0 => jump if false, else jump if true
     // if bit6 == 1 => offset in bit5-0
@@ -711,7 +754,7 @@ void Zed::readBranchInfo(uint32_t &curPc, bool &jumpCond, uint32_t &dest) const 
     }
 }
 
-void Zed::disasmBranch(TextBuffer& tb, uint32_t& curPc) {
+void ZMachine::disasmBranch(TextBuffer& tb, uint32_t& curPc) {
     // read info
     bool jumpCond;
     uint32_t dest;
@@ -724,7 +767,7 @@ void Zed::disasmBranch(TextBuffer& tb, uint32_t& curPc) {
     else tb.printf(" %04X", dest);
 }
 
-void Zed::execBranch(bool condition) {
+bool ZMachine::execBranch(bool condition) {
     // read branch info
     bool jumpCond;
     uint32_t dest;
@@ -733,16 +776,17 @@ void Zed::execBranch(bool condition) {
     if (!((condition) ^ jumpCond)) {
         // if 0 means RFALSE, 1 means RTRUE
         if (dest == 0) {
-            execRet(0);
+            return execRet(0);
         }
         else if (dest == 1) {
-            execRet(1);
+            return execRet(1);
         }
         else {
             // jump
             m_temp.curPc = dest;
         }
     }
+    return true;
 };
 
 /*
@@ -757,7 +801,7 @@ auto dumpMem = [&](uint32_t _pc, uint32_t _size) {
 */
 
 // v1-3
-ZObject_v1* Zed::getObject(uint16_t objIndex) {
+ZObject_v1* ZMachine::getObject(uint16_t objIndex) {
     // v1-3
     assert(m_state.header->version <= 3);
     // TODO: objIndex != 0
@@ -767,14 +811,14 @@ ZObject_v1* Zed::getObject(uint16_t objIndex) {
 }
 
 // v1-3
-uint16_t Zed::getPropertyDefault(uint16_t propIndex) {
+uint16_t ZMachine::getPropertyDefault(uint16_t propIndex) {
     // v1-3
     assert(propIndex < 32);
     uint16_t baseObjs = BE16(m_state.header->objectsAddress);
     return READ16(baseObjs + propIndex * 2);
 }
 
-void Zed::debugPrintObjName(TextBuffer& tb, const ZObject_v1* obj) {
+void ZMachine::debugPrintObjName(TextBuffer& tb, const ZObject_v1* obj) {
     // debugPrint(" '"); debugZText(&m_state.mem[BE16(obj->props) + 1]); debugPrint("'");
     tb.copy(" '");
     const uint8_t* text = &m_state.mem[BE16(obj->props) + 1];
@@ -783,14 +827,12 @@ void Zed::debugPrintObjName(TextBuffer& tb, const ZObject_v1* obj) {
     tb.copy("'");
 }
 
-bool Zed::exec0OPInstruction(uint8_t opcode) {
+bool ZMachine::exec0OPInstruction(uint8_t opcode) {
     switch (opcode & 0b00001111) {
     case OPC_RTRUE:
-        execRet(1);
-        break;
+        return execRet(1);
     case OPC_RFALSE:
-        execRet(0);
-        break;
+        return execRet(0);
     case OPC_PRINT: {
         char out[1024];
         size_t bytesRead = 0;
@@ -811,7 +853,7 @@ bool Zed::exec0OPInstruction(uint8_t opcode) {
     return true;
 }
 
-bool Zed::exec1OPInstruction(uint8_t opcode) {
+bool ZMachine::exec1OPInstruction(uint8_t opcode) {
     const uint16_t val = m_temp.opVals[0];
     switch (opcode & 0b00001111) {
     case OPC_JZ:
@@ -864,6 +906,15 @@ bool Zed::exec1OPInstruction(uint8_t opcode) {
         m_temp.curPc = (uint32_t)((int32_t)m_temp.curPc + (int16_t)val - 2);
         break;
     }
+    case OPC_PRINT_PADDR: {
+        uint32_t addr = packedAddressToByte(val); // packed
+        char out[1024];
+        parseZText(&m_state.mem[addr], out, sizeof(out), nullptr);
+        gamePrint(out);
+        // TEMP
+        return false;
+        break;
+    }
     default:
         errorPrintf("Short 1OP opcode %02X (%s) not implemented yet (op = %u)",
             opcode & 0b00001111, g_opcodes1OP[opcode & 0b00001111].name, opcode);
@@ -872,7 +923,7 @@ bool Zed::exec1OPInstruction(uint8_t opcode) {
     return true;
 }
 
-bool Zed::exec2OPInstruction(uint8_t opcode) {
+bool ZMachine::exec2OPInstruction(uint8_t opcode) {
     // parse and execute opcode
     const uint16_t val1 = m_temp.opVals[0];
     const uint16_t val2 = m_temp.opVals[1];
@@ -1080,55 +1131,10 @@ bool Zed::exec2OPInstruction(uint8_t opcode) {
     return true;
 }
 
-void Zed::execCall() {
-    // read where to store the result
-    uint8_t b = m_state.mem[m_temp.curPc++];
-    // execute routine
-    // save call frame ptr
-    m_state.callsPtr[m_state.curCall] = m_state.sp;
-    // store new location (not necessary, but handy for debugging)
-    uint32_t newPc = packedAddressToByte(m_temp.opVals[0]); // packed
-    assert(newPc < m_state.mem.size());
-    m_state.stackMem[m_state.sp++] = newPc; // TODO: here we are saving to 16bit!!!
-    // store old location
-    m_state.stackMem[m_state.sp++] = m_temp.curPc; // pointer to byte after the CALL
-    // store return variable
-    m_state.stackMem[m_state.sp++] = b;
-    // go to new location
-    m_temp.curPc = newPc;
-    // read number of local variables
-    uint8_t numLocals = m_state.mem[m_temp.curPc++];
-    assert(numLocals < 16);
-    m_state.stackMem[m_state.sp++] = numLocals;
-    // read the initial values of the local variables, v1-4
-    // NOTE: locals starts from callsPtr + 2
-    for (uint8_t i = 0; i < numLocals; ++i) {
-        m_state.stackMem[m_state.sp + i] = READ16(m_temp.curPc);
-        m_temp.curPc += 2;
-    }
-    // overwrite them with function arguments
-    for (uint8_t i = 0; i < (m_temp.numOps - 1) && i < numLocals; ++i) {
-        m_state.stackMem[m_state.sp + i] = m_temp.opVals[i + 1];
-    }
-    // advance sp
-    m_state.sp += numLocals;
-    // advance call index
-    ++m_state.curCall;
-
-    // DEBUG: print call frame
-    uint32_t pp = m_state.callsPtr[m_state.curCall - 1];
-    debugPrintf("Call frame %u: start = %04X, ret = %04X, numLocals = %u\n",
-        m_state.curCall - 1, m_state.stackMem[pp + CALLFRAME_OFF_PC],
-        m_state.stackMem[pp + CALLFRAME_OFF_RET], m_state.stackMem[pp + CALLFRAME_OFF_NUM_LOCALS]);
-    for (uint16_t i = 0; i < m_state.stackMem[pp + CALLFRAME_OFF_NUM_LOCALS]; ++i)
-        debugPrintf("%u) %04X\n", i, m_state.stackMem[pp + CALLFRAME_OFF_LOCALS + i]);
-}
-
-bool Zed::execVarInstruction(uint8_t opcode) {
+bool ZMachine::execVarInstruction(uint8_t opcode) {
     switch (opcode & 0b00011111) {
     case OPC_CALL: {
-        execCall();
-        break;
+        return execCall();
     }
     case OPC_STOREW: {
         assert(m_temp.numOps == 3);
@@ -1200,13 +1206,17 @@ bool Zed::execVarInstruction(uint8_t opcode) {
     case OPC_PUSH: {
         assert(m_temp.numOps == 1);
         // push value
+        assert(m_state.sp < m_state.stackMem.size());
         m_state.stackMem[m_state.sp++] = m_temp.opVals[0];
         break;
     }
     case OPC_PULL: {
         assert(m_temp.numOps == 1);
         // pull (variable)
-        assert(m_state.sp > 0);
+        if (m_state.sp <= m_state.bp) {
+            errorPrint("Stack underflow");
+            return false;
+        }
         setVar((uint8_t)m_temp.opVals[0], m_state.stackMem[--m_state.sp]);
         break;
     }
@@ -1218,7 +1228,7 @@ bool Zed::execVarInstruction(uint8_t opcode) {
     return true;
 }
 
-bool Zed::parseOpcodeAndOperands(ZMachineTemp& temp) const {
+bool ZMachine::parseOpcodeAndOperands(ZMachineTemp& temp) const {
     // read full opcode
     uint32_t &curPc = temp.curPc;
     uint8_t opcode = m_state.mem[curPc++];
@@ -1332,7 +1342,7 @@ bool Zed::parseOpcodeAndOperands(ZMachineTemp& temp) const {
     return true;
 }
 
-bool Zed::disasmCurInstruction(TextBuffer &tb) {
+bool ZMachine::disasmCurInstruction(TextBuffer &tb) {
     // basic check
     if ((size_t)m_state.pc >= m_state.mem.size()) {
         errorPrint("PC out of memory");
@@ -1423,7 +1433,7 @@ bool Zed::disasmCurInstruction(TextBuffer &tb) {
     return true;
 }
 
-bool Zed::step() {
+bool ZMachine::step() {
     bool ret;
 
     // basic check
@@ -1444,6 +1454,9 @@ bool Zed::step() {
         if (m_temp.opTypes[i] == OPTYPE_VAR)
             m_temp.opVals[i] = getVar(m_temp.opVars[i]);
     }
+
+    /*if (m_state.pc == 0x8EF8)
+        DebugBreak();*/
 
     // execute opcode
     if (m_temp.opcode == OPC_EXTENDED) { // only v5+
@@ -1492,7 +1505,7 @@ bool Zed::step() {
     return ret;
 }
 
-bool Zed::run() {
+bool ZMachine::run() {
     bool ret = true;
     while (ret) {
         ret = step();
