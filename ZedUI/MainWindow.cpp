@@ -143,6 +143,7 @@ void ZedThread::run() {
         }
         else if (singleStep) {
             m_zed.disasmCurInstruction(tb);
+            puts(tb.buf); // TEMP
             emit zedAddDisasm(QString(tb.buf));
             m_zed.step();
         }
@@ -151,6 +152,7 @@ void ZedThread::run() {
             bool ret = true;
             while (ret) {
                 m_zed.disasmCurInstruction(tb);
+                puts(tb.buf); // TEMP
                 emit zedAddDisasm(QString(tb.buf));
                 ret = m_zed.step();
             }
@@ -192,6 +194,11 @@ MainWindow::MainWindow(QWidget* parent) :
     ui->btnOk->setEnabled(false);
 
     QTimer::singleShot(UPDATE_TIMER_INTERVAL, this, SLOT(timerUpdateState()));
+
+#if 1 // TEMP
+    QString filename2 = "..\\..\\..\\..\\Data\\zork1-r88-s840726.z3";
+    QTimer::singleShot(20, this, [=]() { QString filename = filename2; loadStory(filename); });
+#endif
 }
 
 MainWindow::~MainWindow() {
@@ -240,7 +247,9 @@ void MainWindow::timerUpdateState() {
         ++i;
     }
     m_disasmMutex.unlock();
-    ui->lstDisasm->verticalScrollBar()->setValue(ui->lstDisasm->verticalScrollBar()->maximum());
+    // scroll down
+    if (i > 0)
+        ui->lstDisasm->verticalScrollBar()->setValue(ui->lstDisasm->verticalScrollBar()->maximum());
     
     QTimer::singleShot(UPDATE_TIMER_INTERVAL, this, SLOT(timerUpdateState()));
 }
@@ -279,7 +288,10 @@ void MainWindow::on_actionLoadStory_triggered() {
     QString filename = QFileDialog::getOpenFileName(this, "Open story file", dir, "Z-Machine v3 stories (*.z3);;All files (*)");
     if (filename.isEmpty())
         return;
+    loadStory(filename);
+}
 
+void MainWindow::loadStory(const QString &filename) {
     QFile file(filename);
     if (!file.open(QIODevice::ReadOnly)) {
         QMessageBox msgBox;
@@ -298,6 +310,7 @@ void MainWindow::on_actionLoadStory_triggered() {
         ui->btnRun->setEnabled(true);
         ui->btnStep->setEnabled(true);
         ui->btnReset->setEnabled(true);
+        ui->btnOk->setEnabled(true);
     }
 }
 

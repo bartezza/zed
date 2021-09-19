@@ -74,6 +74,8 @@ public:
     ZedThread m_zedThread;
 
 private slots:
+    void loadStory(const QString& filename);
+
     void timerUpdateState();
 
     void zedDebugPrint(const QString& str);
