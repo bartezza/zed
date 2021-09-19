@@ -860,6 +860,28 @@ bool ZMachine::exec1OPInstruction(uint8_t opcode) {
     case OPC_JZ:
         execBranch(val == 0);
         break;
+    case OPC_INC: {
+        // inc (variable)
+        // NOTE: val1 is set as a small constant, so we need to get the variable value here.
+        // need to get variable
+        int16_t curVal = (int16_t)getVar((uint8_t)val);
+        // increment
+        ++curVal;
+        // set
+        setVar((uint8_t)val, (uint16_t)curVal);
+        break;
+    }
+    case OPC_DEC: {
+        // dec (variable)
+        // NOTE: val1 is set as a small constant, so we need to get the variable value here.
+        // need to get variable
+        int16_t curVal = (int16_t)getVar((uint8_t)val);
+        // decrement
+        --curVal;
+        // set
+        setVar((uint8_t)val, (uint16_t)curVal);
+        break;
+    }
     case OPC_GET_SIBLING: {
         // get_sibling object -> (result) ?(label)
         // Get next object in tree, branching if this exists, i.e.is not 0.
@@ -948,7 +970,30 @@ bool ZMachine::exec2OPInstruction(uint8_t opcode) {
         execBranch((int16_t)val1 > (int16_t)val2);
         break;
     }
+    case OPC_DEC_CHK: {
+        // dec_chk (variable) value ?(label)
+        // Decrement variable, and branch if it is now less than the given value.
+        // NOTE: this opcode could be called both as 2OP and as VAR. when called as 2OP, the val1 is
+        // set as a small constant, so we need to get the variable value here.
+        // NOTE: not re-getting var here if already gotten since the getVar could have the side effect
+        // of changing the stack (as getVar(0) means pop value from stack)
+        int16_t curVal;
+        if (m_temp.opTypes[0] == OPTYPE_VAR) {
+            // value already gotten
+            curVal = (int16_t)m_temp.opVals[0];
+        }
+        else {
+            // need to get variable
+            curVal = (int16_t)getVar((uint8_t)m_temp.opVals[0]);
+        }
+        --curVal;
+        setVar(m_temp.opVars[0], (uint16_t)curVal);
+        execBranch(curVal < (int16_t)val2);
+        break;
+    }
     case OPC_INC_CHK: {
+        // inc_chk(variable) value ? (label)
+        // Increment variable, and branch if now greater than value.
         // NOTE: this opcode could be called both as 2OP and as VAR. when called as 2OP, the val1 is
         // set as a small constant, so we need to get the variable value here.
         // NOTE: not re-getting var here if already gotten since the getVar could have the side effect
