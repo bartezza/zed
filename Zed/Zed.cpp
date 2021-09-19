@@ -815,7 +815,8 @@ uint16_t ZMachine::getPropertyDefault(uint16_t propIndex) {
     // v1-3
     assert(propIndex < 32);
     uint16_t baseObjs = BE16(m_state.header->objectsAddress);
-    return READ16(baseObjs + propIndex * 2);
+    // NOTE: properties starts from 1!!!
+    return READ16(baseObjs + (propIndex - 1) * 2);
 }
 
 void ZMachine::debugPrintObjName(TextBuffer& tb, const ZObject_v1* obj) {
