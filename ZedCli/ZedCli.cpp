@@ -33,10 +33,10 @@ int main(int argc, char** argv) {
     fclose(fp);
 
     // instantiate zed
-    Zed zed;
+    Zed::ZMachine zed;
     // set callbacks
     zed.debugPrintCallback = [](const char* text) {
-        fputs(text, stdout);
+        // fputs(text, stdout);
     };
     // copy story
     zed.copyStory(mem.data(), mem.size());
@@ -44,8 +44,12 @@ int main(int argc, char** argv) {
     // run
     //zed.run();
     bool ret = true;
+    Zed::TextBuffer tb;
     while (ret) {
-        zed.disasmCurInstruction();
+#if 0
+        zed.disasmCurInstruction(tb);
+        puts(tb.buf);
+#endif
         ret = zed.step();
     }
     return 0;
