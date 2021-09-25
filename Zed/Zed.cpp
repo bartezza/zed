@@ -1260,6 +1260,40 @@ bool ZMachine::execVarInstruction(uint8_t opcode) {
         }
         break;
     }
+    case OPC_SREAD: {
+        /* 1 sread text parse
+           4 sread text parse time routine
+           5 aread text parse time routine -> (result) */
+        // in v1-3 status bar is automatically redisplayed
+        // TODO: time and routine in v4+
+        // TODO: different behavior in v5+
+        uint16_t textBuffer = m_temp.opVals[0];
+        uint8_t maxInputSize = m_state.mem[textBuffer];
+
+        uint16_t parseBuffer = m_temp.opVals[1];
+        uint8_t maxParsedWords = m_state.mem[parseBuffer];
+
+        uint32_t base = BE16(m_state.header->dictionaryAddress);
+        uint8_t numSeps = m_state.mem[base];
+        printf("%u seps: ", numSeps);
+        for (uint8_t i = 0; i < numSeps; ++i)
+            printf("'%c' ", m_state.mem[base + 1 + i]);
+        printf("\n");
+        uint8_t entrySize = m_state.mem[base + 1 + numSeps];
+        uint16_t numEntries = READ16(base + 1 + numSeps + 1);
+
+        uint32_t base2 = base + 1 + numSeps + 1 + 2;
+
+        char out[256];
+        uint16_t idx = 0;
+        for (; idx < numEntries; ++idx) {
+            parseZText(&m_state.mem[base2 + idx * entrySize], out, sizeof(out), nullptr);
+            printf("'%s'\n", out);
+        }
+        
+
+        break;
+    }
     case OPC_PRINT_CHAR: {
         assert(m_temp.numOps == 1);
         char ch[2] = {

@@ -118,6 +118,7 @@ namespace Zed {
         bool disasmCurInstruction(TextBuffer& tb);
 
         size_t parseZText(const uint8_t* text, char* out, size_t outSize, size_t* outTextBytesRead, bool enableAbbrev = true);
+        size_t parseZText(const uint8_t* text, size_t textSize, char* out, size_t outSize, size_t* outTextBytesRead = nullptr, bool enableAbbrev = true);
 
         size_t parseZCharacters(const uint8_t* buf, size_t numBuf, char* out, size_t outSize, bool enableAbbrev = true);
 
