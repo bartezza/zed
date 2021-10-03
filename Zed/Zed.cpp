@@ -8,6 +8,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h> // for DebugBreak
 
+#define DEBUG_READ      0
+
 using namespace Zed;
 
 
@@ -284,11 +286,16 @@ ZOpcodeInfo g_opcodesVAR[] = {
 const char g_zalphabets[3 * 26 + 1] = {
     "abcdefghijklmnopqrstuvwxyz" // A0
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ" // A1
-    " \n0123456789.,!?_#'\"/\\-:()" // A2
+    " \n0123456789.,!?_#'\"/\\-:()" // A2  // v2+
 };
 
-#define ZCHAR_SHIFT_A1      4
-#define ZCHAR_SHIFT_A2      5
+const char g_zchars_a2_v1[] = " \n0123456789.,!?_#'\"/\\-:()"; // v1-
+const char g_zchars_a2_v2[] = " 0123456789.,!?_#'\"/\\<-:()"; // v2+
+
+#define ZCHAR_SHIFT_A1_v1   2 // v1-2
+#define ZCHAR_SHIFT_A2_v1   3 // v1-2
+#define ZCHAR_SHIFT_LOCK_A1 4 // v1-2: shift lock, v3+: shift next
+#define ZCHAR_SHIFT_LOCK_A2 5 // v1-2: shift lock, v3+: shift next
 #define ZCHAR_A2_10BITS     6
 #define ZCHAR_DELETE        8
 //#define ZCHAR_TAB           9 // v6
@@ -402,45 +409,20 @@ size_t ZMachine::parseZCharacters(const uint8_t *buf, size_t numBuf, char* out, 
     // TODO: change this to output ZSCII chars (not assuming ASCII as output)
 
     // NOTE: the code below is for version >= 3 only
+
+    // TODO: in v1-2 there is only 1 abbrev char (zchar == 1), zchars 2 and 3
+    //       mean shift-next, and zchars 4 and 5 mean shift-lock.
+
     // parse the z-chars
     size_t curOut = 0;
+    uint8_t alphabet = 0;
+    uint8_t abbrevSet = 0;
+    uint8_t accum = 0;
     for (size_t i = 0; i < numBuf; ++i) {
         uint8_t curCh = buf[i];
-        uint8_t alphabet = 0;
-        if (curCh == ZCHAR_SHIFT_A1) {
-            if (i >= (numBuf - 1))
-                break;
-            alphabet = 1;
-            // go ahead and read char
-            curCh = buf[++i];
-        }
-        else if (buf[i] == ZCHAR_SHIFT_A2) {
-            if (i >= (numBuf - 1))
-                break;
-            // check for special char for 10 bits ZSCII
-            if (buf[i + 1] == ZCHAR_A2_10BITS) {
-                if (i >= (numBuf - 2))
-                    break;
-                // go ahead and read 5 + 5 bits char
-                curCh = buf[++i];
-                // NOTE: // still using 8bits, as everything > 255 is undefined per spec
-                curCh = (uint8_t)((curCh << 5) | buf[++i]);
-            }
-            else {
-                // go ahead and read char
-                curCh = buf[++i];
-            }
-            alphabet = 2;
-        }
-        // parse z-char
-        if (curCh == 0x00) {
-            out[curOut++] = ' ';
-        }
-        else if (curCh >= 1 && curCh <= 3) { // v3
-            if (i >= (numBuf - 1))
-                break;
+        if (abbrevSet > 0) {
             // abbreviation index
-            uint8_t abbrevIndex = 32 * (curCh - 1) + buf[i + 1];
+            uint8_t abbrevIndex = 32 * (abbrevSet - 1) + curCh;
             if (enableAbbrev) {
                 // read corresponding abbreviation location
                 uint32_t addr = BE16(m_state.header->abbrevAddress) + abbrevIndex * 2;
@@ -455,20 +437,40 @@ size_t ZMachine::parseZCharacters(const uint8_t *buf, size_t numBuf, char* out, 
             else {
                 errorPrintf("Requested abbreviation %u with abbreviations disabled", abbrevIndex);
             }
-            ++i;
+            // reset abbrev set
+            abbrevSet = 0;
         }
-        else if (curCh <= 5) {
-            debugPrintf("TODO: handle shift locking (curCh = %02X)\n", curCh);
-            // assert(false);
-        }
-        /*else if (curCh == ZCHAR_DELETE) {
-            // for input
-        }
-        else if (curCh == ZCHAR_NEWLINE) {
-            out[curOut++] = '\n';
-        }*/
-        else if (curCh >= 6) {
-            out[curOut++] = g_zalphabets[26 * alphabet + curCh - 6];
+        else {
+            if (curCh == 0x00) {
+                out[curOut++] = ' ';
+                // reset alphabet in v3+
+                alphabet = 0;
+            }
+            else if (curCh >= 1 && curCh <= 3) {
+                // in v3+ there is an abbreviation
+                abbrevSet = curCh;
+            }
+            else if (curCh == ZCHAR_SHIFT_LOCK_A1) {
+                alphabet = 1;
+            }
+            else if (curCh == ZCHAR_SHIFT_LOCK_A2) {
+                alphabet = 2;
+            }
+            else {
+                // check for special char for 10 bits ZSCII
+                // only if alphabet == 2
+                if (curCh == ZCHAR_A2_10BITS && alphabet == 2) {
+                    if (i >= (numBuf - 2))
+                        break;
+                    // go ahead and read 5 + 5 bits char
+                    curCh = buf[++i];
+                    // NOTE: // still using 8bits, as everything > 255 is undefined per spec
+                    curCh = (uint8_t)((curCh << 5) | buf[++i]);
+                }
+                out[curOut++] = g_zalphabets[26 * alphabet + curCh - 6];
+                // reset alphabet in v3+
+                alphabet = 0;
+            }
         }
     }
     out[curOut] = '\0';
@@ -1275,23 +1277,165 @@ bool ZMachine::execVarInstruction(uint8_t opcode) {
 
         uint32_t base = BE16(m_state.header->dictionaryAddress);
         uint8_t numSeps = m_state.mem[base];
-        printf("%u seps: ", numSeps);
-        for (uint8_t i = 0; i < numSeps; ++i)
-            printf("'%c' ", m_state.mem[base + 1 + i]);
-        printf("\n");
+        const char* seps = (const char *) &m_state.mem[base + 1];
+
         uint8_t entrySize = m_state.mem[base + 1 + numSeps];
         uint16_t numEntries = READ16(base + 1 + numSeps + 1);
 
         uint32_t base2 = base + 1 + numSeps + 1 + 2;
 
-        char out[256];
+        /*char out[256];
         uint16_t idx = 0;
         for (; idx < numEntries; ++idx) {
             parseZText(&m_state.mem[base2 + idx * entrySize], out, sizeof(out), nullptr);
             printf("'%s'\n", out);
-        }
-        
+        }*/
 
+        // v1-4, v5+: TODO
+        char* buffer = (char *) &m_state.mem[textBuffer + 1];
+        static int cnt = 0;
+        if (cnt == 0) {
+            strcpy(buffer, "open mailbox");
+            ++cnt;
+        } else
+        if (fgets(buffer, maxInputSize, stdin) == nullptr) {
+            // TODO: what to do here?
+            break;
+        }
+
+#if DEBUG_READ
+        printf("String to parse: '%s'\n", buffer);
+#endif
+
+        const char* zchars_a2 = (m_state.header->version == 1) ? g_zchars_a2_v1 : g_zchars_a2_v2;
+        char shift_a2 = (m_state.header->version <= 2) ? ZCHAR_SHIFT_A2_v1 : ZCHAR_SHIFT_LOCK_A2;
+        
+        // tokenize
+        char tempz[12];
+        uint8_t curz = 0;
+        size_t len = strlen(buffer);
+        size_t wordStart = 0;
+        uint8_t curWordEntry = 0;
+        for (size_t i = 0; i <= len; ++i) {
+            // check if space
+            bool sep = false;
+            if (buffer[i] == ' ' || buffer[i] == '\0') {
+                sep = true;
+            }
+            else {
+                // check char against separators
+                for (uint8_t s = 0; s < numSeps; ++s) {
+                    if (buffer[i] == seps[s]) {
+                        // separator found
+                        sep = true;
+                        break;
+                    }
+                }
+            }
+            if (sep) {
+#if DEBUG_READ
+                printf("Parsing word '");
+                for (size_t j = wordStart; j < i; ++j)
+                    putc(buffer[j], stdout);
+                printf("'\n");
+#endif
+                // convert to zchars
+                curz = 0;
+                for (size_t j = wordStart; (j < i) && (curz < sizeof(tempz)); ++j) {
+                    if (buffer[j] >= 'a' && buffer[j] <= 'z')
+                        tempz[curz++] = buffer[j] - 'a' + 6;
+                    else if (buffer[j] >= 'A' && buffer[j] <= 'Z')
+                        tempz[curz++] = buffer[j] - 'A' + 6;
+                    else {
+                        // check if in A2
+                        for (uint8_t c = 0; c < sizeof(g_zchars_a2_v2); ++c) {
+                            if (zchars_a2[c] == buffer[j]) {
+                                // add shift to A2
+                                tempz[curz++] = shift_a2;
+                                // add zchar
+                                tempz[curz++] = c + 6;
+                            }
+                        }
+                    }
+                }
+                // fill the rest with '5'
+                for (uint8_t j = curz; j < sizeof(tempz); ++j) {
+                    tempz[j] = 5;
+                }
+#if DEBUG_READ
+                printf("tempz = ");
+                for (int j = 0; j < sizeof(tempz); ++j)
+                    printf("%u ", tempz[j]);
+                printf("\n");
+#endif
+
+                // encode the zchars
+                uint16_t encoded[3];
+                encoded[0] = BE16((tempz[0] << 10) | (tempz[1] << 5) | (tempz[2]));
+                encoded[1] = BE16((tempz[3] << 10) | (tempz[4] << 5) | (tempz[5]));
+                encoded[2] = BE16((tempz[6] << 10) | (tempz[7] << 5) | (tempz[8]));
+
+                // match the encoded text against the dictionary
+                // TODO: this could be more efficient, using binary search for example
+                uint16_t wordIdx = 0;
+                if (m_state.header->version <= 3) {
+                    // only 4 bytes per encoded word
+                    // add word terminator
+                    encoded[1] |= BE16(0x8000);
+                    // check against the dictionary
+                    for (; wordIdx < numEntries; ++wordIdx) {
+                        if (memcmp(encoded, &m_state.mem[base2 + wordIdx * entrySize], 4) == 0)
+                            break;
+                    }
+                }
+                else {
+                    // 6 bytes per encoded word
+                    // add word terminator
+                    encoded[2] |= BE16(0x8000);
+
+                    // check against the dictionary
+                    for (; wordIdx < numEntries; ++wordIdx) {
+                        if (memcmp(encoded, &m_state.mem[base2 + wordIdx * entrySize], 6) == 0)
+                            break;
+                    }
+                }
+
+                // do we have space in the word buffer?
+                if (curWordEntry < maxParsedWords) {
+                    // write found word entry
+                    uint8_t* entry = &m_state.mem[parseBuffer + 2 + 4 * curWordEntry];
+                    // has a word been found in the dict?
+                    if (wordIdx < numEntries) {
+#if DEBUG_READ
+                        char out[256];
+                        parseZText(&m_state.mem[base2 + wordIdx * entrySize], out, sizeof(out), nullptr);
+                        printf("Found word at %u: '%s'\n", wordIdx, out);
+#endif
+                        // write word address
+                        uint16_t wordAddress = base2 + wordIdx * entrySize;
+                        entry[0] = (wordAddress >> 8) & 0xFF;
+                        entry[1] = wordAddress & 0xFF;
+                    }
+                    else {
+                        // word not found
+                        entry[0] = 0;
+                        entry[1] = 0;
+                    }
+                    // number of letters in the word
+                    entry[2] = (uint8_t)(i - wordStart);
+                    // start of word
+                    entry[3] = (uint8_t) wordStart;
+
+                    // advance
+                    ++curWordEntry;
+                }
+
+                // continue with next word
+                wordStart = i + 1;
+            }
+        }
+        // store number of words parsed
+        m_state.mem[parseBuffer + 1] = curWordEntry;
         break;
     }
     case OPC_PRINT_CHAR: {
