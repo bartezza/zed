@@ -1068,7 +1068,7 @@ bool ZMachine::exec2OPInstruction(uint8_t opcode) {
         // DEBUG: print object name
         //debugPrintObjName(obj);
         // check attribute and jump
-        uint8_t cond = obj->attr[val2 >> 3] & (1 << (7 - val2 & 0x07));
+        uint8_t cond = obj->attr[val2 >> 3] & (1 << (7 - (val2 & 0x07)));
         execBranch(cond);
         break;
     }
@@ -1079,7 +1079,17 @@ bool ZMachine::exec2OPInstruction(uint8_t opcode) {
         // DEBUG: print object name
         //debugPrintObjName(obj);
         // set attribute
-        obj->attr[val2 >> 3] |= (1 << (7 - val2 & 0x07));
+        obj->attr[val2 >> 3] |= (1 << (7 - (val2 & 0x07)));
+        break;
+    }
+    case OPC_CLEAR_ATTR: {
+        assert(val2 < 32);
+        // clear_attr object attribute
+        ZObject_v1* obj = getObject(val1);
+        // DEBUG: print object name
+        //debugPrintObjName(obj);
+        // clear attribute
+        obj->attr[val2 >> 3] &= ~(1 << (7 - (val2 & 0x07)));
         break;
     }
     case OPC_STORE:
