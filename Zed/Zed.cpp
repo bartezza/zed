@@ -1189,6 +1189,40 @@ bool ZMachine::exec2OPInstruction(uint8_t opcode) {
         }
         break;
     }
+    case OPC_GET_PROP_ADDR: {
+        // get_prop_addr object property -> (result)
+        // get_prop object property -> (result)
+        const ZObject_v1* obj = getObject(val1);
+        // DEBUG: print object name
+        //debugPrintObjName(obj);
+        // get prop header
+        uint16_t curPtr = BE16(obj->props);
+        // skip name of object
+        curPtr += 1 + m_state.mem[curPtr] * 2;
+        // read properties
+        while (1) {
+            // read header
+            uint8_t propHead = m_state.mem[curPtr];
+            // end of property list?
+            if (propHead == 0) {
+                // not found, return zero
+                setVar(m_state.mem[m_temp.curPc++], 0);
+                break;
+            }
+            // propHead = 32 times the number of data bytes minus one, plus the property number
+            uint8_t propNum = propHead & 0b00011111;
+            uint8_t propSize = (propHead >> 5) + 1;
+            // check prop num
+            if (propNum == val2) {
+                // return prop address
+                setVar(m_state.mem[m_temp.curPc++], BE16(curPtr + 1));
+                break;
+            }
+            // advance
+            curPtr += 1 + propSize;
+        }
+        break;
+    }
     case OPC_ADD:
         setVar(m_state.mem[m_temp.curPc++], (uint16_t)((int16_t)val1 + (int16_t)val2));
         break;
