@@ -881,6 +881,19 @@ bool ZMachine::exec1OPInstruction(uint8_t opcode) {
     case OPC_JZ:
         execBranch(val == 0);
         break;
+    case OPC_GET_PROP_LEN: {
+        // get_prop_len property-address -> (result)
+        if (val == 0) {
+            setVar(m_state.mem[m_temp.curPc++], 0);
+            break;
+        }
+        // read byte before the property address passed
+        uint8_t propHead = m_state.mem[val - 1];
+        // return size
+        uint8_t propSize = (propHead >> 5) + 1;
+        setVar(m_state.mem[m_temp.curPc++], propSize);
+        break;
+    }
     case OPC_INC: {
         // inc (variable)
         // NOTE: val1 is set as a small constant, so we need to get the variable value here.
