@@ -1050,6 +1050,12 @@ bool ZMachine::exec2OPInstruction(uint8_t opcode) {
         execBranch(obj1->parent == val2);
         break;
     }
+    case OPC_TEST: {
+        // test bitmap flags ?(label)
+        // jump if all flags in bitmap are set
+        execBranch((val1 & val2) == val2);
+        break;
+    }
     case OPC_OR:
         setVar(m_state.mem[m_temp.curPc++], val1 | val2);
         break;
