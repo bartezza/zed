@@ -859,6 +859,17 @@ bool ZMachine::exec0OPInstruction(uint8_t opcode) {
         gamePrint(out);
         break;
     }
+    case OPC_PRINT_RET: {
+        //  print_ret <literal-string>
+        char out[1024];
+        size_t bytesRead = 0;
+        size_t curOut = parseZText(&m_state.mem[m_temp.curPc], out, sizeof(out), &bytesRead);
+        m_temp.curPc += (uint32_t)bytesRead;
+        gamePrint(out);
+        gamePrint("\n");
+        execRet(1);
+        break;
+    }
     case OPC_RET_POPPED:
         // ret_popped
         // Pops top of stack and returns that. (This is equivalent to ret sp, but is one byte cheaper.)
