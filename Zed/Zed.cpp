@@ -1216,10 +1216,19 @@ bool ZMachine::execVarInstruction(uint8_t opcode) {
         return execCall();
     }
     case OPC_STOREW: {
+        // storew array word-index value
         assert(m_temp.numOps == 3);
         // TODO: check actual address (should be in dynamic memory)
         uint32_t addr = (uint32_t)m_temp.opVals[0] + (uint32_t)m_temp.opVals[1] * 2;
         WRITE16(addr, m_temp.opVals[2]);
+        break;
+    }
+    case OPC_STOREB: {
+        // storeb array byte-index value
+        assert(m_temp.numOps == 3);
+        // TODO: check actual address (should be in dynamic memory)
+        uint32_t addr = (uint32_t)m_temp.opVals[0] + (uint32_t)m_temp.opVals[1];
+        m_state.mem[addr] = (uint8_t) m_temp.opVals[2];
         break;
     }
     case OPC_PUT_PROP: {
